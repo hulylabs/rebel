@@ -55,10 +55,10 @@ impl VmValue {
     const TAG_GET_WORD: u8 = 9;
 }
 
-impl TryFrom<(u8, Word)> for VmValue {
+impl TryFrom<(Word, u8)> for VmValue {
     type Error = MemoryError;
 
-    fn try_from((tag, addr): (u8, Word)) -> Result<Self, Self::Error> {
+    fn try_from((addr, tag): (Word, u8)) -> Result<Self, Self::Error> {
         match tag {
             VmValue::TAG_NONE => Ok(VmValue::None),
             VmValue::TAG_INT => Ok(VmValue::Int(addr as i32)),
@@ -84,25 +84,23 @@ pub trait Item: Sized {
 
 impl Item for VmValue {
     type Error = MemoryError;
-    const SIZE: usize = 8;
+    const SIZE: usize = 2;
 
     fn load(data: &[u8]) -> Result<Self, Self::Error> {
-        let addr = data.get(0..4).ok_or(MemoryError::OutOfBounds)?.try_into()?;
-        let addr = u32::from_le_bytes(addr);
+        let addr = data.get(..4).ok_or(MemoryError::OutOfBounds)?;
         let tag = data.get(4).copied().ok_or(MemoryError::OutOfBounds)?;
-        (tag, addr).try_into()
+        (u32::from_le_bytes(addr.try_into()?), tag).try_into()
     }
 }
 
 pub struct Box(Addr);
 
 impl<'a> Box {
-    pub fn open<T: AsRef<[u8]> + ?Sized>(self, memory: &'a T) -> Option<&'a [u8]> {
+    pub fn open<T: AsRef<[Word]> + ?Sized>(self, memory: &'a T) -> Option<&'a [Word]> {
         let addr = self.0.as_usize();
         let memory = memory.as_ref();
-        let header = memory.get(addr..addr + 4)?;
-        let size = header.try_into().ok().map(u32::from_le_bytes)? as usize;
-        memory.get(addr + 4..addr + size)
+        let cap = memory.get(addr).copied()? as usize;
+        memory.get(addr + 1..addr + cap)
     }
 }
 
@@ -112,8 +110,6 @@ impl<'a, I> Series<'a, I>
 where
     I: Item<Error = MemoryError>,
 {
-    const HEADER_SIZE: usize = 4;
-
     pub fn len(&self) -> usize {
         self.0.len() / I::SIZE
     }
@@ -122,16 +118,12 @@ where
         self.0.is_empty()
     }
 
-    pub fn load<T: AsRef<[u8]> + ?Sized>(memory: &'a T, bx: Box) -> Option<Series<'a, I>> {
+    pub fn load<T: AsRef<[u32]> + ?Sized>(memory: &'a T, bx: Box) -> Option<Series<'a, I>> {
         let memory = bx.open(memory)?;
-        let (header, data) = memory.split_at_checked(Self::HEADER_SIZE)?;
-        let items = header
-            .try_into()
-            .ok()
-            .map(u32::from_le_bytes)
-            .map(|x| x as usize)?;
-        data.get(..items * I::SIZE)
-            .map(|data| Series(data, PhantomData))
+        let (items, data) = memory.split_first()?;
+        let bytes = unsafe { std::mem::transmute::<&[u32], &[u8]>(data) };
+        let allocated = (*items as usize) * I::SIZE;
+        bytes.get(..allocated).map(|data| Series(data, PhantomData))
     }
 
     pub fn get(&self, index: usize) -> Result<I, I::Error> {
@@ -143,7 +135,7 @@ where
     }
 }
 
-pub fn load_series(memory: &[u8], bx: Box, pos: usize) -> Result<VmValue, MemoryError> {
+pub fn load_series(memory: &[Word], bx: Box, pos: usize) -> Result<VmValue, MemoryError> {
     Series::<VmValue>::load(memory, bx)
         .ok_or(MemoryError::OutOfBounds)
         .and_then(|series| series.get(pos))
