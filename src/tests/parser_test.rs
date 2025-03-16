@@ -287,14 +287,34 @@ mod tests {
         assert!(parse("[99999999999]").is_err());
     }
 
-    // Static parse method test from parser.rs
+    // Static parse methods test from parser.rs
     #[test]
-    fn test_static_parse_method() {
-        // Test the static parse method with a simple input
+    fn test_parse_str_method() {
+        // Test the parse_str method with a simple input
         let input = r#"[word 123 "string"]"#;
 
         let mut collector = SimpleCollector::default();
         Parser::parse_str(input, &mut collector).unwrap();
+
+        assert_eq!(
+            collector.tokens,
+            vec![
+                "BeginBlock",
+                "Word: word",
+                "Integer: 123",
+                "String: string",
+                "EndBlock",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_block_method() {
+        // Test the parse_block method with a simple input (not in brackets)
+        let input = r#"word 123 "string""#;
+
+        let mut collector = SimpleCollector::default();
+        Parser::parse_block(input, &mut collector).unwrap();
 
         assert_eq!(
             collector.tokens,

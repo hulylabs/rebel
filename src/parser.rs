@@ -5,13 +5,20 @@
 //! This module provides a parser for a REBOL-inspired language, which is a flexible,
 //! lightweight, and dynamic language with minimal syntax.
 //!
-//! The parser handles:
-//! - Strings with escape sequences
-//! - Different word types (regular words, set-words, get-words)
-//! - Integer literals
-//! - Block structures (nested blocks)
-//! - Path notation
-//! - Comments (semicolon style)
+//! The parser offers two primary ways to process input:
+//! - `parse_str`: Parses the input exactly as provided
+//! - `parse_block`: Automatically wraps the input in a block
+//!
+//! The parser handles the following REBOL-inspired syntax elements:
+//! - Strings with escape sequences (e.g., `"Hello\nWorld"`)
+//! - Different word types:
+//!   - Regular words (e.g., `word`)
+//!   - Set-words with trailing colon (e.g., `word:`)
+//!   - Get-words with leading colon (e.g., `:word`)
+//! - Integer literals (e.g., `123`, `-456`, `+789`)
+//! - Block structures with nested blocks (e.g., `[outer [inner]]`)
+//! - Path notation (e.g., `word/path/item`)
+//! - Comments using semicolons (e.g., `; comment`)
 
 use std::str::CharIndices;
 use thiserror::Error;
@@ -95,33 +102,8 @@ impl<'a, C> Parser<'a, C>
 where
     C: Collector,
 {
-    /// Creates a new parser
-    ///
-    /// # Parameters
-    ///
-    /// * `input` - The input string to parse
-    /// * `collector` - The collector that will receive parsed tokens
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use rebel::parser::{Collector, WordKind, Parser};
-    /// # struct MyCollector;
-    /// # impl Collector for MyCollector {
-    /// #     type Error = ();
-    /// #     fn string(&mut self, _: &str) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn word(&mut self, _: WordKind, _: &str) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn integer(&mut self, _: i32) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn begin_block(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn end_block(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn begin_path(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn end_path(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    /// # }
-    /// # let mut collector = MyCollector;
-    /// let input = "[word 123 \"string\"]";
-    /// let mut parser = Parser::new(input, &mut collector);
-    /// ```
-    pub fn new(input: &'a str, collector: &'a mut C) -> Self {
+    // Internal constructor
+    fn new(input: &'a str, collector: &'a mut C) -> Self {
         Self {
             input,
             collector,
@@ -130,11 +112,17 @@ where
         }
     }
 
-    /// Parse a block from the input
+    /// Parse input as a block
     ///
-    /// This method will parse the input until the end, treating it as a block.
-    /// It calls the collector's `begin_block` and `end_block` methods, along
-    /// with methods for each parsed token.
+    /// This method parses the input text and automatically wraps it in a block,
+    /// calling the collector's `begin_block` and `end_block` methods to surround the content.
+    /// This is useful when you want to parse content and treat it as if it were
+    /// enclosed in square brackets, even if it's not.
+    ///
+    /// # Parameters
+    ///
+    /// * `input` - The input string to parse
+    /// * `collector` - The collector that will receive parsed tokens
     ///
     /// # Returns
     ///
@@ -157,16 +145,19 @@ where
     /// #     fn end_path(&mut self) -> Result<(), Self::Error> { Ok(()) }
     /// # }
     /// # let mut collector = MyCollector;
-    /// let input = "[word 123 \"string\"]";
-    /// let mut parser = Parser::new(input, &mut collector);
-    /// parser.parse_block().expect("Failed to parse block");
+    /// // Note: Input content isn't inside brackets, but will be treated as a block
+    /// let input = "word 123 \"string\"";
+    /// Parser::parse_block(input, &mut collector).expect("Failed to parse block");
     /// ```
-    pub fn parse_block(&mut self) -> Result<(), ParserError<C::Error>> {
-        self.collector
+    pub fn parse_block(input: &'a str, collector: &'a mut C) -> Result<(), ParserError<C::Error>> {
+        let mut parser = Self::new(input, collector);
+        parser
+            .collector
             .begin_block()
             .map_err(ParserError::CollectorError)?;
-        self.do_parse()?;
-        self.collector
+        parser.do_parse()?;
+        parser
+            .collector
             .end_block()
             .map_err(ParserError::CollectorError)
     }
