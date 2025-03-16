@@ -274,17 +274,23 @@ mod tests {
 
     #[test]
     fn test_error_conditions() {
+        use crate::parser::ParserError;
+
         // Invalid escape sequence
-        assert!(parse(r#"["invalid \z escape"]"#).is_err());
+        let result = parse(r#"["invalid \z escape"]"#);
+        assert!(matches!(result, Err(ParserError::UnexpectedChar('z'))));
 
         // Unclosed string
-        assert!(parse(r#"["unclosed string]"#).is_err());
+        let result = parse(r#"["unclosed string]"#);
+        assert!(matches!(result, Err(ParserError::EndOfInput)));
 
         // Empty word (error)
-        assert!(parse("[:]").is_err());
+        let result = parse("[:]");
+        assert!(matches!(result, Err(ParserError::EmptyWord)));
 
         // Integer overflow (if we try to parse a number larger than i32::MAX)
-        assert!(parse("[99999999999]").is_err());
+        let result = parse("[99999999999]");
+        assert!(matches!(result, Err(ParserError::IntegerOverflow)));
     }
 
     // Static parse methods test from parser.rs
