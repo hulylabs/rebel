@@ -67,7 +67,7 @@ impl Value {
             }
             Value::GetWord(w) => {
                 let mut result = ":".to_string();
-                result.push_str(&w);
+                result.push_str(w);
                 result
             }
             Value::Block(block) => {
@@ -90,7 +90,7 @@ impl Value {
                         result.push(' ');
                     }
                     first = false;
-                    result.push_str(&key);
+                    result.push_str(key);
                     result.push(':');
                     result.push_str(&value.form());
                 }
@@ -210,10 +210,7 @@ impl Value {
 
     /// Check if value represents a boolean (Int with value 0 or 1)
     pub fn is_boolean(&self) -> bool {
-        match self {
-            Value::Int(0 | 1) => true,
-            _ => false,
-        }
+        matches!(self, Value::Bool(_))
     }
     /// Extract an i32 value if this is an Int
     pub fn as_int(&self) -> Option<i32> {

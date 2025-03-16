@@ -44,6 +44,10 @@ where
         self.0.len() / I::SIZE
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     pub fn load<T: AsRef<[u8]> + ?Sized>(memory: &'a T, bx: Box) -> Option<Series<'a, I>> {
         let memory = bx.open(memory)?;
         let (header, data) = memory.split_at_checked(Self::HEADER_SIZE)?;
