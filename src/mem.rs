@@ -1,5 +1,6 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
+use crate::parse::{Collector, WordKind};
 use std::marker::PhantomData;
 use thiserror::Error;
 
@@ -218,6 +219,18 @@ pub trait Series {
 //     }
 // }
 
+impl Item for u8 {
+    const SIZE: usize = 1;
+
+    fn load(data: &[u8]) -> Option<Self> {
+        data.get(0).copied()
+    }
+
+    fn store(self, data: &mut [u8]) -> Option<()> {
+        data.get_mut(0).map(|slot| *slot = self)
+    }
+}
+
 pub struct Heap<'a>(&'a mut [Word]);
 
 impl<'a> Heap<'a> {
@@ -237,6 +250,26 @@ impl<'a> Heap<'a> {
         data.get_mut(addr..addr + words)
             .map(|data| (data, Addr(addr as Word)))
     }
+
+    fn alloc_raw(&mut self, raw: &[u8]) -> Option<Addr> {
+        let bytes = raw.len();
+        let size_words = (bytes + 3) / 4 + 1;
+        let (sealed, addr) = self.alloc_words(size_words)?;
+
+        let (len, data) = sealed.split_first_mut()?;
+        *len = bytes as Word;
+        let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
+
+        for (src, dst) in raw.iter().zip(data.iter_mut()) {
+            *dst = *src;
+        }
+
+        Some(addr)
+    }
+
+    pub fn alloc_string(&mut self, string: &str) -> Option<Addr> {
+        self.alloc_raw(string.as_bytes())
+    }
 }
 
 pub struct Sealed<'a, I: Item>(&'a mut [Word], PhantomData<I>);
@@ -246,19 +279,20 @@ where
     I: Item,
 {
     pub fn alloc(heap: &'a mut Heap<'a>, slice: Slice<'a, I>) -> Option<Addr> {
-        let bytes = slice.0.len();
-        let size_words = (bytes + 3) / 4 + 1;
-        let (sealed, addr) = heap.alloc_words(size_words)?;
+        // let bytes = slice.0.len();
+        // let size_words = (bytes + 3) / 4 + 1;
+        // let (sealed, addr) = heap.alloc_words(size_words)?;
 
-        let (len, data) = sealed.split_first_mut()?;
-        *len = bytes as Word;
-        let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
+        // let (len, data) = sealed.split_first_mut()?;
+        // *len = bytes as Word;
+        // let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
 
-        for (src, dst) in slice.0.iter().zip(data.iter_mut()) {
-            *dst = *src;
-        }
+        // for (src, dst) in slice.0.iter().zip(data.iter_mut()) {
+        //     *dst = *src;
+        // }
 
-        Some(addr)
+        // Some(addr)
+        heap.alloc_raw(slice.0)
     }
 
     pub fn load(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Self> {
@@ -367,7 +401,76 @@ where
     // fn parse(&mut self, input: &str) -> Option<()> {}
 }
 
-//
+// P A R S E  C O L L E C T O R
+
+struct ParseCollector<'a> {
+    heap: Heap<'a>,
+    parse: Stack<'a, MemValue>,
+}
+
+impl<'a> ParseCollector<'a> {
+    fn new(heap: Heap<'a>, parse: Stack<'a, MemValue>) -> Self {
+        Self { heap, parse }
+    }
+}
+
+impl<'a> Collector for ParseCollector<'a> {
+    type Error = MemoryError;
+
+    fn string(&mut self, string: &str) -> Result<(), Self::Error> {
+        let addr = self
+            .heap
+            .alloc_string(string)
+            .ok_or(MemoryError::OutOfBounds)?;
+        self.parse
+            .push(MemValue(addr.0, VmValue::TAG_STRING))
+            .ok_or(MemoryError::OutOfBounds)
+    }
+
+    fn word(&mut self, kind: WordKind, word: &str) -> Result<(), Self::Error> {
+        Ok(())
+        // self.module.get_or_insert_symbol(word).and_then(|id| {
+        //     let value = match kind {
+        //         WordKind::Word => VmValue::Word(id),
+        //         WordKind::SetWord => VmValue::SetWord(id),
+        //         WordKind::GetWord => VmValue::GetWord(id),
+        //     };
+        //     self.parse.push(value.vm_repr())
+        // })
+    }
+
+    fn integer(&mut self, value: i32) -> Result<(), MemoryError> {
+        self.parse
+            .push(MemValue(value as Word, VmValue::TAG_INT))
+            .ok_or(MemoryError::OutOfBounds)
+    }
+
+    fn begin_block(&mut self) -> Result<(), MemoryError> {
+        // self.parse.len().and_then(|len| self.ops.push([len]))
+        Ok(())
+    }
+
+    fn end_block(&mut self) -> Result<(), MemoryError> {
+        // let [bp] = self.ops.pop()?;
+        // let block_data = self.parse.pop_all(bp).ok_or(MemoryError::UnexpectedError)?;
+        // let offset = self.module.heap.alloc_block(block_data)?;
+        // self.parse.push([VmValue::TAG_BLOCK, offset])
+        Ok(())
+    }
+
+    fn begin_path(&mut self) -> Result<(), Self::Error> {
+        // self.parse.len().and_then(|len| self.ops.push([len]))
+        Ok(())
+    }
+
+    fn end_path(&mut self) -> Result<(), Self::Error> {
+        // let [bp] = self.ops.pop()?;
+        // let block_data = self.parse.pop_all(bp).ok_or(MemoryError::UnexpectedError)?;
+        // let offset = self.module.heap.alloc_block(block_data)?;
+        // self.parse.push([VmValue::TAG_PATH, offset])
+        Ok(())
+    }
+}
 
 //
 
