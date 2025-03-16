@@ -1,5 +1,5 @@
 pub mod mem;
-pub mod parser;
+pub mod parse;
 pub mod value;
 
 #[cfg(test)]

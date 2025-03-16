@@ -1,6 +1,6 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use crate::parser::{Collector, Parser, ParserError, WordKind};
+use crate::parse::{Collector, Parser, ParserError, WordKind};
 
 /// Simple collector for parser tests that records all tokens in a single list
 /// which makes it easier to verify expectations in tests
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_error_conditions() {
-        use crate::parser::ParserError;
+        use crate::parse::ParserError;
 
         // Invalid escape sequence
         let result = parse(r#"["invalid \z escape"]"#);

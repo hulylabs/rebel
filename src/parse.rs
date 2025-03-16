@@ -132,7 +132,7 @@ where
     /// # Example
     ///
     /// ```
-    /// # use rebel::parser::{Collector, WordKind, Parser};
+    /// # use rebel::parse::{Collector, WordKind, Parser};
     /// # struct MyCollector;
     /// # impl Collector for MyCollector {
     /// #     type Error = ();
@@ -181,7 +181,7 @@ where
     /// # Example
     ///
     /// ```
-    /// # use rebel::parser::{Collector, WordKind, Parser};
+    /// # use rebel::parse::{Collector, WordKind, Parser};
     /// # struct MyCollector;
     /// # impl Collector for MyCollector {
     /// #     type Error = ();
