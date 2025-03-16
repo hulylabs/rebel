@@ -292,6 +292,15 @@ where
         let slot = data.get_mut(addr..addr + I::SIZE)?;
         I::store(item, slot)
     }
+
+    fn pop(&mut self) -> Option<I> {
+        let (len, data) = self.0.split_first_mut()?;
+        let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
+        let addr = len.checked_sub(I::SIZE as Word)?;
+        *len = addr;
+        let addr = addr as usize;
+        data.get(addr..addr + I::SIZE).and_then(I::load)
+    }
 }
 
 //
@@ -321,12 +330,21 @@ where
         Some(Stack(data, PhantomData))
     }
 
-    pub fn push(&mut self, item: I) -> Option<()> {
+    fn get_sealed(&'a mut self) -> Option<Sealed<'a, I>> {
         let (_, sealed) = self.0.split_first_mut()?;
-        let mut sealed = Sealed::<I>(sealed, PhantomData);
-        sealed.push(item)
+        Some(Sealed(sealed, PhantomData))
+    }
+
+    pub fn push(&'a mut self, item: I) -> Option<()> {
+        self.get_sealed()?.push(item)
+    }
+
+    pub fn pop(&'a mut self) -> Option<I> {
+        self.get_sealed()?.pop()
     }
 }
+
+//
 
 //
 
@@ -338,6 +356,18 @@ pub fn get_sealed_item<'a>(heap: &'a mut HeapMut<'a>, addr: Addr, pos: usize) ->
     Sealed::load(heap, addr).and_then(Sealed::items)?.get(pos)
 }
 
-pub fn push_item(stack: &mut Stack<MemValue>, item: MemValue) -> Option<()> {
-    stack.push(item)
+pub fn push_item<'a>(heap: &'a mut HeapMut<'a>, addr: Addr, item: MemValue) -> Option<()> {
+    Stack::load(heap, addr)?.push(item)
+}
+
+pub fn pop_item<'a>(heap: &'a mut HeapMut<'a>, addr: Addr) -> Option<MemValue> {
+    Stack::load(heap, addr)?.pop()
+}
+
+pub fn sealed_load<'a>(heap: &'a mut HeapMut<'a>, addr: Addr) -> Option<Sealed<'a, MemValue>> {
+    Sealed::load(heap, addr)
+}
+
+pub fn stack_load<'a>(heap: &'a mut HeapMut<'a>, addr: Addr) -> Option<Stack<'a, MemValue>> {
+    Stack::load(heap, addr)
 }
