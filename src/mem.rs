@@ -364,7 +364,7 @@ where
         Self { memory }
     }
 
-    fn parse(&mut self, input: &str) -> Option<()> {}
+    // fn parse(&mut self, input: &str) -> Option<()> {}
 }
 
 //
