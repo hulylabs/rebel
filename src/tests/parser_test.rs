@@ -61,7 +61,7 @@ mod tests {
     // Helper function to create a parser and run the parse operation
     fn parse(input: &str) -> Result<SimpleCollector, ParserError<()>> {
         let mut collector = SimpleCollector::default();
-        Parser::parse_str(input, &mut collector)?;
+        Parser::parse(input, &mut collector)?;
         Ok(collector)
     }
 
@@ -289,12 +289,12 @@ mod tests {
 
     // Static parse methods test from parser.rs
     #[test]
-    fn test_parse_str_method() {
-        // Test the parse_str method with a simple input
+    fn test_parse_method() {
+        // Test the parse method with a simple input
         let input = r#"[word 123 "string"]"#;
 
         let mut collector = SimpleCollector::default();
-        Parser::parse_str(input, &mut collector).unwrap();
+        Parser::parse(input, &mut collector).unwrap();
 
         assert_eq!(
             collector.tokens,

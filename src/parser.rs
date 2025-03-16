@@ -6,7 +6,7 @@
 //! lightweight, and dynamic language with minimal syntax.
 //!
 //! The parser offers two primary ways to process input:
-//! - `parse_str`: Parses the input exactly as provided
+//! - `parse`: Parses the input exactly as provided
 //! - `parse_block`: Automatically wraps the input in a block
 //!
 //! The parser handles the following REBOL-inspired syntax elements:
@@ -164,9 +164,9 @@ where
 
     /// Parse input directly with a collector
     ///
-    /// This static method provides a convenient way to parse input without
-    /// needing to create a parser instance manually. Unlike `parse_block`, this does not
-    /// automatically wrap the input in a block - it parses the input exactly as provided.
+    /// This method parses the input exactly as provided without adding any wrappers.
+    /// Unlike `parse_block`, which automatically wraps the input in a block,
+    /// `parse` processes the input exactly as given.
     ///
     /// # Parameters
     ///
@@ -195,9 +195,9 @@ where
     /// # }
     /// # let mut collector = MyCollector;
     /// let input = "[word 123 \"string\"]";
-    /// Parser::parse_str(input, &mut collector).expect("Failed to parse");
+    /// Parser::parse(input, &mut collector).expect("Failed to parse");
     /// ```
-    pub fn parse_str(input: &'a str, collector: &'a mut C) -> Result<(), ParserError<C::Error>> {
+    pub fn parse(input: &'a str, collector: &'a mut C) -> Result<(), ParserError<C::Error>> {
         let mut parser = Self::new(input, collector);
         parser.do_parse()
     }
@@ -226,7 +226,7 @@ where
         let mut result = String::new();
         let mut escaped = false;
 
-        while let Some((_, char)) = self.cursor.next() {
+        for (_, char) in self.cursor.by_ref() {
             if escaped {
                 // Handle escape sequences
                 let escaped_char = match char {
@@ -264,7 +264,7 @@ where
         consumed: Option<char>,
     ) -> Result<Option<char>, C::Error> {
         if let Some('/') = consumed {
-            if self.in_path == false {
+            if !self.in_path {
                 self.in_path = true;
                 self.collector.begin_path()?;
             }
