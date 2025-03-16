@@ -2,51 +2,54 @@
 
 use crate::parser::{Collector, Parser, ParserError, WordKind};
 
-/// Test collector implementation for parser tests
+/// Simple collector for parser tests that records all tokens in a single list
+/// which makes it easier to verify expectations in tests
 #[derive(PartialEq, Debug, Default)]
-pub struct TestCollector {
-    pub strings: Vec<String>,
-    pub words: Vec<(WordKind, String)>,
-    pub integers: Vec<i32>,
-    pub block_depth: i32,
-    pub path_depth: i32,
+pub struct SimpleCollector {
+    /// Collected tokens as formatted strings
+    pub tokens: Vec<String>,
 }
 
-impl Collector for TestCollector {
+impl Collector for SimpleCollector {
     type Error = ();
 
     fn string(&mut self, string: &str) -> Result<(), Self::Error> {
-        self.strings.push(string.to_string());
+        self.tokens.push(format!("String: {}", string));
         Ok(())
     }
 
     fn word(&mut self, kind: WordKind, word: &str) -> Result<(), Self::Error> {
-        self.words.push((kind, word.to_string()));
+        let kind_str = match kind {
+            WordKind::Word => "Word",
+            WordKind::SetWord => "SetWord",
+            WordKind::GetWord => "GetWord",
+        };
+        self.tokens.push(format!("{}: {}", kind_str, word));
         Ok(())
     }
 
     fn integer(&mut self, value: i32) -> Result<(), Self::Error> {
-        self.integers.push(value);
+        self.tokens.push(format!("Integer: {}", value));
         Ok(())
     }
 
     fn begin_block(&mut self) -> Result<(), Self::Error> {
-        self.block_depth += 1;
+        self.tokens.push("BeginBlock".to_string());
         Ok(())
     }
 
     fn end_block(&mut self) -> Result<(), Self::Error> {
-        self.block_depth -= 1;
+        self.tokens.push("EndBlock".to_string());
         Ok(())
     }
 
     fn begin_path(&mut self) -> Result<(), Self::Error> {
-        self.path_depth += 1;
+        self.tokens.push("BeginPath".to_string());
         Ok(())
     }
 
     fn end_path(&mut self) -> Result<(), Self::Error> {
-        self.path_depth -= 1;
+        self.tokens.push("EndPath".to_string());
         Ok(())
     }
 }
@@ -56,9 +59,9 @@ mod tests {
     use super::*;
 
     // Helper function to create a parser and run the parse operation
-    fn parse(input: &str) -> Result<TestCollector, ParserError<()>> {
-        let mut collector = TestCollector::default();
-        Parser::parse(input, &mut collector)?;
+    fn parse(input: &str) -> Result<SimpleCollector, ParserError<()>> {
+        let mut collector = SimpleCollector::default();
+        Parser::parse_str(input, &mut collector)?;
         Ok(collector)
     }
 
@@ -76,15 +79,16 @@ mod tests {
         let collector = parse(input).unwrap();
 
         assert_eq!(
-            collector.words,
+            collector.tokens,
             vec![
-                (WordKind::Word, "word1".to_string()),
-                (WordKind::Word, "word2".to_string()),
+                "BeginBlock",
+                "Word: word1",
+                "String: string",
+                "Integer: 123",
+                "Word: word2",
+                "EndBlock"
             ]
         );
-        assert_eq!(collector.strings, vec!["string"]);
-        assert_eq!(collector.integers, vec![123]);
-        assert_eq!(collector.block_depth, 0); // Should be balanced
     }
 
     #[test]
@@ -101,14 +105,16 @@ mod tests {
         let collector = parse(input).unwrap();
 
         assert_eq!(
-            collector.strings,
+            collector.tokens,
             vec![
-                "Hello\nWorld",
-                "Tab\tCharacter",
-                "Quotes: \"quoted\"",
-                "Backslash: \\",
-                "Carriage Return: \r",
-                "Mixed: \t\r\n\"\\"
+                "BeginBlock",
+                "String: Hello\nWorld",
+                "String: Tab\tCharacter",
+                "String: Quotes: \"quoted\"",
+                "String: Backslash: \\",
+                "String: Carriage Return: \r",
+                "String: Mixed: \t\r\n\"\\",
+                "EndBlock"
             ]
         );
     }
@@ -120,8 +126,12 @@ mod tests {
         let collector = parse(input).unwrap();
 
         assert_eq!(
-            collector.strings,
-            vec!["This string has \"escaped quotes\""]
+            collector.tokens,
+            vec![
+                "BeginBlock",
+                "String: This string has \"escaped quotes\"",
+                "EndBlock"
+            ]
         );
     }
 
@@ -131,7 +141,10 @@ mod tests {
 
         let collector = parse(input).unwrap();
 
-        assert_eq!(collector.strings, vec!["Line1\nLine2\nLine3"]);
+        assert_eq!(
+            collector.tokens,
+            vec!["BeginBlock", "String: Line1\nLine2\nLine3", "EndBlock"]
+        );
     }
 
     #[test]
@@ -140,7 +153,17 @@ mod tests {
 
         let collector = parse(input).unwrap();
 
-        assert_eq!(collector.integers, vec![123, -456, 0, 789]);
+        assert_eq!(
+            collector.tokens,
+            vec![
+                "BeginBlock",
+                "Integer: 123",
+                "Integer: -456",
+                "Integer: 0",
+                "Integer: 789",
+                "EndBlock"
+            ]
+        );
     }
 
     #[test]
@@ -150,11 +173,13 @@ mod tests {
         let collector = parse(input).unwrap();
 
         assert_eq!(
-            collector.words,
+            collector.tokens,
             vec![
-                (WordKind::Word, "word".to_string()),
-                (WordKind::SetWord, "set-word".to_string()),
-                (WordKind::GetWord, "get-word".to_string()),
+                "BeginBlock",
+                "Word: word",
+                "SetWord: set-word",
+                "GetWord: get-word",
+                "EndBlock"
             ]
         );
     }
@@ -165,20 +190,23 @@ mod tests {
 
         let collector = parse(input).unwrap();
 
-        // We won't be able to verify the nesting structure directly with our simple collector,
-        // but we can verify the words were collected
         assert_eq!(
-            collector.words,
+            collector.tokens,
             vec![
-                (WordKind::Word, "outer".to_string()),
-                (WordKind::Word, "inner1".to_string()),
-                (WordKind::Word, "deep".to_string()),
-                (WordKind::Word, "inner2".to_string()),
+                "BeginBlock",
+                "Word: outer",
+                "BeginBlock",
+                "Word: inner1",
+                "BeginBlock",
+                "Word: deep",
+                "EndBlock",
+                "EndBlock",
+                "BeginBlock",
+                "Word: inner2",
+                "EndBlock",
+                "EndBlock"
             ]
         );
-
-        // Block depth should be balanced at the end
-        assert_eq!(collector.block_depth, 0);
     }
 
     #[test]
@@ -188,18 +216,21 @@ mod tests {
         let collector = parse(input).unwrap();
 
         assert_eq!(
-            collector.words,
+            collector.tokens,
             vec![
-                (WordKind::Word, "word".to_string()),
-                (WordKind::Word, "path".to_string()),
-                (WordKind::Word, "item".to_string()),
-                (WordKind::Word, "word".to_string()),
-                (WordKind::Word, "item".to_string()),
+                "BeginBlock",
+                "BeginPath",
+                "Word: word",
+                "Word: path",
+                "Word: item",
+                "EndPath",
+                "BeginPath",
+                "Word: word",
+                "Word: item",
+                "EndPath",
+                "EndBlock"
             ]
         );
-
-        // Path depth should be balanced at the end
-        assert_eq!(collector.path_depth, 0);
     }
 
     #[test]
@@ -213,18 +244,23 @@ mod tests {
 
         let collector = parse(input).unwrap();
 
-        assert_eq!(collector.integers, vec![123, -456]);
         assert_eq!(
-            collector.words,
+            collector.tokens,
             vec![
-                (WordKind::Word, "word1".to_string()),
-                (WordKind::SetWord, "word2".to_string()),
-                (WordKind::Word, "nested".to_string()),
-                (WordKind::GetWord, "get-word".to_string()),
+                "BeginBlock",
+                "Word: word1",
+                "Integer: 123",
+                "String: string",
+                "SetWord: word2",
+                "Integer: -456",
+                "BeginBlock",
+                "Word: nested",
+                "EndBlock",
+                "GetWord: get-word",
+                "String: multi\n            line",
+                "EndBlock"
             ]
         );
-        // When parsing multi-line strings, the parser preserves indentation
-        assert_eq!(collector.strings, vec!["string", "multi\n            line"]);
     }
 
     #[test]
@@ -233,9 +269,7 @@ mod tests {
 
         let collector = parse(input).unwrap();
 
-        assert_eq!(collector.words.len(), 0);
-        assert_eq!(collector.integers.len(), 0);
-        assert_eq!(collector.strings.len(), 0);
+        assert_eq!(collector.tokens, vec!["BeginBlock", "EndBlock"]);
     }
 
     #[test]
@@ -251,5 +285,26 @@ mod tests {
 
         // Integer overflow (if we try to parse a number larger than i32::MAX)
         assert!(parse("[99999999999]").is_err());
+    }
+
+    // Static parse method test from parser.rs
+    #[test]
+    fn test_static_parse_method() {
+        // Test the static parse method with a simple input
+        let input = r#"[word 123 "string"]"#;
+
+        let mut collector = SimpleCollector::default();
+        Parser::parse_str(input, &mut collector).unwrap();
+
+        assert_eq!(
+            collector.tokens,
+            vec![
+                "BeginBlock",
+                "Word: word",
+                "Integer: 123",
+                "String: string",
+                "EndBlock",
+            ]
+        );
     }
 }

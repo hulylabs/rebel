@@ -165,7 +165,7 @@ where
         self.collector
             .begin_block()
             .map_err(ParserError::CollectorError)?;
-        self.parse_tokens()?;
+        self.do_parse()?;
         self.collector
             .end_block()
             .map_err(ParserError::CollectorError)
@@ -204,11 +204,11 @@ where
     /// # }
     /// # let mut collector = MyCollector;
     /// let input = "[word 123 \"string\"]";
-    /// Parser::parse(input, &mut collector).expect("Failed to parse");
+    /// Parser::parse_str(input, &mut collector).expect("Failed to parse");
     /// ```
-    pub fn parse(input: &'a str, collector: &'a mut C) -> Result<(), ParserError<C::Error>> {
+    pub fn parse_str(input: &'a str, collector: &'a mut C) -> Result<(), ParserError<C::Error>> {
         let mut parser = Self::new(input, collector);
-        parser.parse_tokens()
+        parser.do_parse()
     }
 
     fn skip_whitespace(&mut self) -> Option<(usize, char)> {
@@ -282,93 +282,45 @@ where
     }
 
     fn parse_word(&mut self, start_pos: usize) -> Result<Option<char>, ParserError<C::Error>> {
-        // Determine word type and content based on initial character and subsequent parsing
+        let mut kind = WordKind::Word;
+        let mut word_start = start_pos;
+
+        // Special handling for get-words starting with a colon
         if self.input.as_bytes().get(start_pos) == Some(&b':') {
-            // This is a get-word starting with ':'
-            self.cursor.next(); // Skip the colon
-
-            // Parse the word part (after the colon)
-            let word_start = start_pos + 1;
-            let mut end_pos = word_start;
-
-            let terminator = loop {
-                match self.cursor.next() {
-                    Some((pos, c)) => {
-                        if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '?' {
-                            end_pos = pos + 1;
-                        } else if c == ']' || c == '/' || c.is_ascii_whitespace() {
-                            end_pos = pos;
-                            break Some(c);
-                        } else {
-                            return Err(ParserError::UnexpectedChar(c));
-                        }
-                    }
-                    None => {
-                        break None;
-                    }
-                }
-            };
-
-            if end_pos <= word_start {
-                return Err(ParserError::EmptyWord);
-            }
-
-            let word = self
-                .input
-                .get(word_start..end_pos)
-                .ok_or(ParserError::UnexpectedError)?;
-            self.collector
-                .word(WordKind::GetWord, word)
-                .map_err(ParserError::CollectorError)?;
-
-            Ok(terminator)
-        } else {
-            // Regular word or set-word
-            let mut end_pos = start_pos;
-            let mut is_set_word = false;
-
-            let terminator = loop {
-                match self.cursor.next() {
-                    Some((pos, c)) => {
-                        if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '?' {
-                            end_pos = pos + 1;
-                        } else if c == ':' {
-                            is_set_word = true;
-                            end_pos = pos;
-                            break None; // Colon consumed, no terminator to return
-                        } else if c == ']' || c == '/' || c.is_ascii_whitespace() {
-                            end_pos = pos;
-                            break Some(c);
-                        } else {
-                            return Err(ParserError::UnexpectedChar(c));
-                        }
-                    }
-                    None => {
-                        break None;
-                    }
-                }
-            };
-
-            if end_pos <= start_pos {
-                return Err(ParserError::EmptyWord);
-            }
-
-            let word = self
-                .input
-                .get(start_pos..end_pos)
-                .ok_or(ParserError::UnexpectedError)?;
-            let kind = if is_set_word {
-                WordKind::SetWord
-            } else {
-                WordKind::Word
-            };
-
-            self.collector
-                .word(kind, word)
-                .map_err(ParserError::CollectorError)?;
-
-            Ok(terminator)
+            kind = WordKind::GetWord;
+            word_start = start_pos + 1; // Skip the colon for get-words
         }
+
+        let consumed = loop {
+            match self.cursor.next() {
+                Some((pos, char)) => match char {
+                    ':' => {
+                        if pos != start_pos {
+                            // Not at the beginning (already handled)
+                            kind = WordKind::SetWord;
+                            break Some(char);
+                        }
+                    }
+                    ']' | '/' => break Some(char),
+                    c if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '?' => {}
+                    c if c.is_ascii_whitespace() => break Some(char),
+                    _ => return Err(ParserError::UnexpectedChar(char)),
+                },
+                None => break None,
+            }
+        };
+
+        let pos = self.cursor.offset() - if consumed.is_some() { 1 } else { 0 };
+        if pos <= word_start {
+            return Err(ParserError::EmptyWord);
+        }
+        let symbol = self
+            .input
+            .get(word_start..pos)
+            .ok_or(ParserError::UnexpectedError)?;
+
+        self.collect_word(symbol, kind, consumed)
+            .map_err(ParserError::CollectorError)
     }
 
     fn parse_number(&mut self, char: char) -> Result<Option<char>, ParserError<C::Error>> {
@@ -434,7 +386,7 @@ where
         Ok(())
     }
 
-    fn parse_tokens(&mut self) -> Result<(), ParserError<C::Error>> {
+    fn do_parse(&mut self) -> Result<(), ParserError<C::Error>> {
         while let Some((pos, char)) = self.skip_whitespace() {
             let consumed = match char {
                 '[' => self
@@ -456,76 +408,4 @@ where
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{Collector, Parser, WordKind};
-
-    #[derive(PartialEq, Debug, Default)]
-    struct SimpleCollector {
-        tokens: Vec<String>,
-    }
-
-    impl Collector for SimpleCollector {
-        type Error = ();
-
-        fn string(&mut self, string: &str) -> Result<(), Self::Error> {
-            self.tokens.push(format!("String: {}", string));
-            Ok(())
-        }
-
-        fn word(&mut self, kind: WordKind, word: &str) -> Result<(), Self::Error> {
-            let kind_str = match kind {
-                WordKind::Word => "Word",
-                WordKind::SetWord => "SetWord",
-                WordKind::GetWord => "GetWord",
-            };
-            self.tokens.push(format!("{}: {}", kind_str, word));
-            Ok(())
-        }
-
-        fn integer(&mut self, value: i32) -> Result<(), Self::Error> {
-            self.tokens.push(format!("Integer: {}", value));
-            Ok(())
-        }
-
-        fn begin_block(&mut self) -> Result<(), Self::Error> {
-            self.tokens.push("BeginBlock".to_string());
-            Ok(())
-        }
-
-        fn end_block(&mut self) -> Result<(), Self::Error> {
-            self.tokens.push("EndBlock".to_string());
-            Ok(())
-        }
-
-        fn begin_path(&mut self) -> Result<(), Self::Error> {
-            self.tokens.push("BeginPath".to_string());
-            Ok(())
-        }
-
-        fn end_path(&mut self) -> Result<(), Self::Error> {
-            self.tokens.push("EndPath".to_string());
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn test_static_parse_method() {
-        // Test the static parse method with a simple input
-        let input = r#"[word 123 "string"]"#;
-
-        let mut collector = SimpleCollector::default();
-        Parser::parse(input, &mut collector).unwrap();
-
-        assert_eq!(
-            collector.tokens,
-            vec![
-                "BeginBlock",
-                "Word: word",
-                "Integer: 123",
-                "String: string",
-                "EndBlock",
-            ]
-        );
-    }
-}
+// Tests have been moved to src/tests/parser_test.rs
