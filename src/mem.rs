@@ -27,7 +27,6 @@ impl Addr {
 #[derive(Debug)]
 pub struct Symbol(Addr);
 
-/// Represents a Rebel value in VM memory
 #[derive(Debug)]
 pub enum VmValue {
     None,
@@ -53,6 +52,21 @@ impl VmValue {
     const TAG_WORD: u8 = 7;
     const TAG_SET_WORD: u8 = 8;
     const TAG_GET_WORD: u8 = 9;
+
+    fn serialize(&self) -> (Word, u8) {
+        match self {
+            VmValue::None => (0, VmValue::TAG_NONE),
+            VmValue::Int(value) => (*value as u32, VmValue::TAG_INT),
+            VmValue::Bool(value) => (if *value { 1 } else { 0 }, VmValue::TAG_BOOL),
+            VmValue::Block(addr) => (addr.0, VmValue::TAG_BLOCK),
+            VmValue::Context(addr) => (addr.0, VmValue::TAG_CONTEXT),
+            VmValue::Path(addr) => (addr.0, VmValue::TAG_PATH),
+            VmValue::String(addr) => (addr.0, VmValue::TAG_STRING),
+            VmValue::Word(symbol) => (symbol.0.0, VmValue::TAG_WORD),
+            VmValue::SetWord(symbol) => (symbol.0.0, VmValue::TAG_SET_WORD),
+            VmValue::GetWord(symbol) => (symbol.0.0, VmValue::TAG_GET_WORD),
+        }
+    }
 }
 
 impl TryFrom<(Word, u8)> for VmValue {
@@ -80,33 +94,75 @@ pub trait Item: Sized {
     const SIZE: usize;
 
     fn load(data: &[u8]) -> Result<Self, Self::Error>;
+    fn store(&self, data: &mut [u8]) -> Result<(), Self::Error>;
 }
 
 impl Item for VmValue {
     type Error = MemoryError;
-    const SIZE: usize = 2;
+    const SIZE: usize = 8;
 
     fn load(data: &[u8]) -> Result<Self, Self::Error> {
         let addr = data.get(..4).ok_or(MemoryError::OutOfBounds)?;
         let tag = data.get(4).copied().ok_or(MemoryError::OutOfBounds)?;
         (u32::from_le_bytes(addr.try_into()?), tag).try_into()
     }
+
+    fn store(&self, data: &mut [u8]) -> Result<(), Self::Error> {
+        let (addr, tag) = self.serialize();
+        data.get_mut(..4)
+            .ok_or(MemoryError::OutOfBounds)?
+            .copy_from_slice(&addr.to_le_bytes());
+        data.get_mut(4)
+            .map(|tag_byte| *tag_byte = tag)
+            .ok_or(MemoryError::OutOfBounds)
+    }
 }
 
-pub struct Box(Addr);
+pub struct Boxed<I>(Addr, PhantomData<I>);
 
-impl<'a> Box {
-    pub fn open<T: AsRef<[Word]> + ?Sized>(self, memory: &'a T) -> Option<&'a [Word]> {
+impl<'a, I> Boxed<I>
+where
+    I: Item<Error = MemoryError>,
+{
+    fn unbox<T: AsRef<[Word]> + ?Sized>(self, memory: &'a T) -> Option<&'a [Word]> {
         let addr = self.0.as_usize();
         let memory = memory.as_ref();
         let cap = memory.get(addr).copied()? as usize;
         memory.get(addr + 1..addr + cap)
     }
+
+    pub fn unbox_sliced<T: AsRef<[Word]> + ?Sized>(self, memory: &'a T) -> Option<Sliced<'a, I>> {
+        let memory = self.unbox(memory)?;
+        let (items, data) = memory.split_first()?;
+        let bytes = unsafe { std::mem::transmute::<&[u32], &[u8]>(data) };
+        let allocated = (*items as usize) * I::SIZE;
+        bytes.get(..allocated).map(|data| Sliced(data, PhantomData))
+    }
 }
 
-pub struct Series<'a, I: Item>(&'a [u8], PhantomData<I>);
+pub struct HeapMut<'a>(&'a mut [Word]);
 
-impl<'a, I> Series<'a, I>
+impl<'a> HeapMut<'a> {
+    pub fn alloc_series<I: Item<Error = MemoryError>>(
+        &mut self,
+        cap_items: usize,
+    ) -> Option<Boxed<I>> {
+        let size_words = (I::SIZE * cap_items + 3) / 4 + 1;
+        let (len, data) = self.0.split_first_mut()?;
+        let addr = *len as usize;
+        *len += size_words as Word;
+
+        let allocated = data.get_mut(addr..addr + size_words)?;
+        let (cap, object) = allocated.split_first_mut()?;
+        *cap = size_words as Word;
+        SeriesMut::<I>::init(object)?;
+        Some(Boxed(Addr(addr as Word), PhantomData))
+    }
+}
+
+pub struct Sliced<'a, I: Item>(&'a [u8], PhantomData<I>);
+
+impl<'a, I> Sliced<'a, I>
 where
     I: Item<Error = MemoryError>,
 {
@@ -118,14 +174,6 @@ where
         self.0.is_empty()
     }
 
-    pub fn load<T: AsRef<[u32]> + ?Sized>(memory: &'a T, bx: Box) -> Option<Series<'a, I>> {
-        let memory = bx.open(memory)?;
-        let (items, data) = memory.split_first()?;
-        let bytes = unsafe { std::mem::transmute::<&[u32], &[u8]>(data) };
-        let allocated = (*items as usize) * I::SIZE;
-        bytes.get(..allocated).map(|data| Series(data, PhantomData))
-    }
-
     pub fn get(&self, index: usize) -> Result<I, I::Error> {
         let start = I::SIZE * index;
         self.0
@@ -135,8 +183,45 @@ where
     }
 }
 
-pub fn load_series(memory: &[Word], bx: Box, pos: usize) -> Result<VmValue, MemoryError> {
-    Series::<VmValue>::load(memory, bx)
-        .ok_or(MemoryError::OutOfBounds)
-        .and_then(|series| series.get(pos))
+pub struct SeriesMut<'a, I: Item>(&'a mut [Word], PhantomData<I>);
+
+impl<'a, I> SeriesMut<'a, I>
+where
+    I: Item<Error = MemoryError>,
+{
+    fn init(data: &'a mut [Word]) -> Option<Self> {
+        data.first_mut().map(|len| *len = 0)?;
+        Some(SeriesMut(data, PhantomData))
+    }
+
+    pub fn len(&self) -> Option<usize> {
+        self.0.first().map(|len| *len as usize)
+    }
+
+    pub fn is_empty(&self) -> Option<bool> {
+        self.len().map(|len| len == 0)
+    }
+
+    pub fn push(&mut self, item: I) -> Result<(), I::Error> {
+        let (len, data) = self.0.split_first_mut().ok_or(MemoryError::OutOfBounds)?;
+        let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
+        let addr = *len as usize;
+        *len += I::SIZE as Word;
+        I::store(&item, &mut data[addr..addr + I::SIZE])
+    }
+}
+
+pub fn alloc_series<'a>(heap: &mut HeapMut) -> Result<Boxed<VmValue>, MemoryError> {
+    let series = heap
+        .alloc_series::<VmValue>(64)
+        .ok_or(MemoryError::OutOfBounds)?;
+}
+
+pub fn load_slices(
+    memory: &[Word],
+    obj: Boxed<VmValue>,
+    pos: usize,
+) -> Result<VmValue, MemoryError> {
+    let slices = obj.unbox_sliced(memory).ok_or(MemoryError::OutOfBounds)?;
+    slices.get(pos)
 }
