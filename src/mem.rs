@@ -218,9 +218,9 @@ pub trait Series {
 //     }
 // }
 
-pub struct HeapMut<'a>(&'a mut [Word]);
+pub struct Heap<'a>(&'a mut [Word]);
 
-impl<'a> HeapMut<'a> {
+impl<'a> Heap<'a> {
     fn get_word(&self, addr: Addr) -> Option<Word> {
         self.0.get(addr.as_usize() + 1).copied()
     }
@@ -245,7 +245,7 @@ impl<'a, I> Sealed<'a, I>
 where
     I: Item,
 {
-    pub fn alloc(heap: &'a mut HeapMut<'a>, slice: Slice<'a, I>) -> Option<Addr> {
+    pub fn alloc(heap: &'a mut Heap<'a>, slice: Slice<'a, I>) -> Option<Addr> {
         let bytes = slice.0.len();
         let size_words = (bytes + 3) / 4 + 1;
         let (sealed, addr) = heap.alloc_words(size_words)?;
@@ -261,7 +261,7 @@ where
         Some(addr)
     }
 
-    pub fn load(heap: &'a mut HeapMut<'a>, addr: Addr) -> Option<Self> {
+    pub fn load(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Self> {
         let len = heap.get_word(addr)?;
         let allocated = (len + 3) / 4 + 1;
         let data = heap.get_mut(addr, allocated)?;
@@ -311,7 +311,7 @@ impl<'a, I> Stack<'a, I>
 where
     I: Item,
 {
-    pub fn alloc(heap: &'a mut HeapMut<'a>, items: usize) -> Option<Addr> {
+    pub fn alloc(heap: &'a mut Heap<'a>, items: usize) -> Option<Addr> {
         let bytes = items * I::SIZE;
         let size_words = (bytes + 3) / 4 + 2;
         let (stack, addr) = heap.alloc_words(size_words)?;
@@ -324,7 +324,7 @@ where
         }
     }
 
-    pub fn load(heap: &'a mut HeapMut<'a>, addr: Addr) -> Option<Self> {
+    pub fn load(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Self> {
         let cap = heap.get_word(addr)?;
         let data = heap.get_mut(addr, cap)?;
         Some(Stack(data, PhantomData))
@@ -346,28 +346,51 @@ where
 
 //
 
+pub struct Memory<'a, T> {
+    memory: &'a mut T,
+}
+
+impl<'a, T> Memory<'a, T>
+where
+    T: AsMut<[Word]>,
+{
+    pub fn new(memory: &'a mut T) -> Self {
+        // let (parser, rest) = memory.as_mut().split_at_mut_checked(1000)?;
+
+        // Some(Self {
+        //     heap: Heap(rest),
+        //     parser: Stack(parser, PhantomData),
+        // })
+        Self { memory }
+    }
+
+    fn parse(&mut self, input: &str) -> Option<()> {}
+}
+
 //
 
-pub fn alloc_sealed<'a>(heap: &'a mut HeapMut<'a>, slice: Slice<'a, MemValue>) -> Option<Addr> {
+//
+
+pub fn alloc_sealed<'a>(heap: &'a mut Heap<'a>, slice: Slice<'a, MemValue>) -> Option<Addr> {
     Sealed::alloc(heap, slice)
 }
 
-pub fn get_sealed_item<'a>(heap: &'a mut HeapMut<'a>, addr: Addr, pos: usize) -> Option<MemValue> {
+pub fn get_sealed_item<'a>(heap: &'a mut Heap<'a>, addr: Addr, pos: usize) -> Option<MemValue> {
     Sealed::load(heap, addr).and_then(Sealed::items)?.get(pos)
 }
 
-pub fn push_item<'a>(heap: &'a mut HeapMut<'a>, addr: Addr, item: MemValue) -> Option<()> {
+pub fn push_item<'a>(heap: &'a mut Heap<'a>, addr: Addr, item: MemValue) -> Option<()> {
     Stack::load(heap, addr)?.push(item)
 }
 
-pub fn pop_item<'a>(heap: &'a mut HeapMut<'a>, addr: Addr) -> Option<MemValue> {
+pub fn pop_item<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<MemValue> {
     Stack::load(heap, addr)?.pop()
 }
 
-pub fn sealed_load<'a>(heap: &'a mut HeapMut<'a>, addr: Addr) -> Option<Sealed<'a, MemValue>> {
+pub fn sealed_load<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Sealed<'a, MemValue>> {
     Sealed::load(heap, addr)
 }
 
-pub fn stack_load<'a>(heap: &'a mut HeapMut<'a>, addr: Addr) -> Option<Stack<'a, MemValue>> {
+pub fn stack_load<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Stack<'a, MemValue>> {
     Stack::load(heap, addr)
 }
