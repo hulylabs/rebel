@@ -1,22 +1,52 @@
 // RebelDB™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
+use crate::parser::{Collector, WordKind};
 use smol_str::SmolStr;
+use thiserror::Error;
 
+/// Errors that can occur during value collection
+#[derive(Debug, Error)]
+pub enum ValueCollectorError {
+    /// Attempted to end a block without a matching begin_block
+    #[error("unmatched end_block")]
+    UnmatchedEndBlock,
+
+    /// Attempted to end a path without a matching begin_path
+    #[error("unmatched end_path")]
+    UnmatchedEndPath,
+
+    /// Attempted to end a path when the current context is a block
+    #[error("end path without matching begin_path")]
+    PathBlockMismatch,
+}
+
+/// Represents a RebelDB value in memory
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    /// Represents no value
     None,
+    /// Integer value
     Int(i32),
+    /// Boolean value
     Bool(bool),
+    /// Ordered collection of values
     Block(Box<[Value]>),
+    /// String value
     String(SmolStr),
+    /// Word identifier
     Word(SmolStr),
+    /// Word with assignment semantics
     SetWord(SmolStr),
+    /// Word with lookup semantics
     GetWord(SmolStr),
+    /// Key-value pairs representing an object
     Context(Box<[(SmolStr, Value)]>),
+    /// Path expression
     Path(Box<[Value]>),
 }
 
 impl Value {
+    /// Converts the value to its string representation
     pub fn form(&self) -> String {
         match self {
             Value::None => "none".into(),
@@ -128,6 +158,7 @@ impl Value {
         )
     }
 
+    /// Create a Path value from any iterable of Values
     pub fn path<I: IntoIterator<Item = Value>>(values: I) -> Self {
         Value::Path(values.into_iter().collect::<Vec<_>>().into_boxed_slice())
     }
@@ -165,6 +196,16 @@ impl Value {
     /// Check if value is Context
     pub fn is_context(&self) -> bool {
         matches!(self, Value::Context(_))
+    }
+
+    /// Check if value is GetWord
+    pub fn is_get_word(&self) -> bool {
+        matches!(self, Value::GetWord(_))
+    }
+
+    /// Check if value is Path
+    pub fn is_path(&self) -> bool {
+        matches!(self, Value::Path(_))
     }
 
     /// Check if value represents a boolean (Int with value 0 or 1)
@@ -235,6 +276,146 @@ impl Value {
         match self {
             Value::Context(pairs) => Some(pairs),
             _ => None,
+        }
+    }
+
+    /// Extract a get_word reference if this is a GetWord
+    pub fn as_get_word(&self) -> Option<&SmolStr> {
+        match self {
+            Value::GetWord(w) => Some(w),
+            _ => None,
+        }
+    }
+
+    /// Extract a path slice if this is a Path
+    pub fn as_path(&self) -> Option<&[Value]> {
+        match self {
+            Value::Path(path) => Some(path),
+            _ => None,
+        }
+    }
+
+    /// Create a GetWord value
+    pub fn get_word<S: Into<SmolStr>>(value: S) -> Self {
+        Value::GetWord(value.into())
+    }
+}
+
+/// Collector that builds a Value during parsing
+///
+/// This collector implements the Collector trait to build a hierarchical Value
+/// structure as tokens are parsed. It maintains a stack of current blocks/paths
+/// to handle nesting correctly.
+pub struct ValueCollector {
+    /// The final collected value
+    result: Option<Value>,
+    /// Stack of values for nested blocks and paths
+    stack: Vec<Vec<Value>>,
+    /// Stack tracking whether each level is a block or path
+    path_stack: Vec<bool>,
+}
+
+impl ValueCollector {
+    /// Create a new ValueCollector
+    pub fn new() -> Self {
+        Self {
+            result: None,
+            stack: Vec::new(),
+            path_stack: Vec::new(),
+        }
+    }
+
+    /// Get the final collected value
+    ///
+    /// Returns the constructed Value if parsing was successful,
+    /// or None if no value was built (e.g., empty input).
+    pub fn value(&self) -> Option<Value> {
+        self.result.clone()
+    }
+
+    /// Push a value to the current block or path being built
+    fn push_value(&mut self, value: Value) {
+        if let Some(current) = self.stack.last_mut() {
+            current.push(value);
+        } else {
+            self.result = Some(value);
+        }
+    }
+}
+
+impl Default for ValueCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Collector for ValueCollector {
+    type Error = ValueCollectorError;
+
+    fn string(&mut self, string: &str) -> Result<(), Self::Error> {
+        self.push_value(Value::string(string));
+        Ok(())
+    }
+
+    fn word(&mut self, kind: WordKind, word: &str) -> Result<(), Self::Error> {
+        let value = match kind {
+            WordKind::Word => Value::word(word),
+            WordKind::SetWord => Value::set_word(word),
+            WordKind::GetWord => Value::get_word(word),
+        };
+        self.push_value(value);
+        Ok(())
+    }
+
+    fn integer(&mut self, value: i32) -> Result<(), Self::Error> {
+        self.push_value(Value::int(value));
+        Ok(())
+    }
+
+    fn begin_block(&mut self) -> Result<(), Self::Error> {
+        self.stack.push(Vec::new());
+        self.path_stack.push(false);
+        Ok(())
+    }
+
+    fn end_block(&mut self) -> Result<(), Self::Error> {
+        if let Some(values) = self.stack.pop() {
+            self.path_stack.pop();
+            let block = Value::block(values);
+
+            if self.stack.is_empty() {
+                self.result = Some(block);
+            } else {
+                self.push_value(block);
+            }
+            Ok(())
+        } else {
+            Err(ValueCollectorError::UnmatchedEndBlock)
+        }
+    }
+
+    fn begin_path(&mut self) -> Result<(), Self::Error> {
+        self.stack.push(Vec::new());
+        self.path_stack.push(true);
+        Ok(())
+    }
+
+    fn end_path(&mut self) -> Result<(), Self::Error> {
+        if let Some(values) = self.stack.pop() {
+            if self.path_stack.pop() != Some(true) {
+                return Err(ValueCollectorError::PathBlockMismatch);
+            }
+
+            let path = Value::path(values);
+
+            if self.stack.is_empty() {
+                self.result = Some(path);
+            } else {
+                self.push_value(path);
+            }
+            Ok(())
+        } else {
+            Err(ValueCollectorError::UnmatchedEndPath)
         }
     }
 }
