@@ -324,7 +324,7 @@ where
         let addr = *len as usize;
         *len += I::SIZE as Word;
         let slot = data.get_mut(addr..addr + I::SIZE)?;
-        I::store(item, slot)
+        item.store(slot)
     }
 
     fn pop(&mut self) -> Option<I> {
@@ -364,16 +364,16 @@ where
         Some(Stack(data, PhantomData))
     }
 
-    fn get_sealed(&'a mut self) -> Option<Sealed<'a, I>> {
+    fn get_sealed<'b>(&'b mut self) -> Option<Sealed<'b, I>> {
         let (_, sealed) = self.0.split_first_mut()?;
         Some(Sealed(sealed, PhantomData))
     }
 
-    pub fn push(&'a mut self, item: I) -> Option<()> {
+    pub fn push(&mut self, item: I) -> Option<()> {
         self.get_sealed()?.push(item)
     }
 
-    pub fn pop(&'a mut self) -> Option<I> {
+    pub fn pop(&mut self) -> Option<I> {
         self.get_sealed()?.pop()
     }
 }
@@ -440,9 +440,8 @@ impl<'a> Collector for ParseCollector<'a> {
     }
 
     fn integer(&mut self, value: i32) -> Result<(), MemoryError> {
-        self.parse
-            .push(MemValue(value as Word, VmValue::TAG_INT))
-            .ok_or(MemoryError::OutOfBounds)
+        let mem_value = MemValue(value as Word, VmValue::TAG_INT);
+        self.parse.push(mem_value).ok_or(MemoryError::OutOfBounds)
     }
 
     fn begin_block(&mut self) -> Result<(), MemoryError> {
