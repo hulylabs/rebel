@@ -1,22 +1,96 @@
-//
+// Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
 use std::marker::PhantomData;
+use thiserror::Error;
 
-type Addr = u32;
-
-pub trait Item: Sized {
-    const SIZE: usize;
-
-    fn load(data: &[u8]) -> Option<Self>;
+#[derive(Debug, Error)]
+pub enum MemoryError {
+    #[error("invalid tag")]
+    InvalidTag,
+    #[error("out of bounds")]
+    OutOfBounds,
+    #[error(transparent)]
+    TryFromSlice(#[from] std::array::TryFromSliceError),
 }
 
-impl Item for [u32; 2] {
+type Word = u32;
+
+#[derive(Debug)]
+pub struct Addr(Word);
+
+impl Addr {
+    pub fn as_usize(&self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Debug)]
+pub struct Symbol(Addr);
+
+/// Represents a Rebel value in VM memory
+#[derive(Debug)]
+pub enum VmValue {
+    None,
+    Int(i32),
+    Bool(bool),
+    Block(Addr),
+    Context(Addr),
+    Path(Addr),
+    String(Addr),
+    Word(Symbol),
+    SetWord(Symbol),
+    GetWord(Symbol),
+}
+
+impl VmValue {
+    const TAG_NONE: u8 = 0;
+    const TAG_INT: u8 = 1;
+    const TAG_BOOL: u8 = 2;
+    const TAG_BLOCK: u8 = 3;
+    const TAG_CONTEXT: u8 = 4;
+    const TAG_PATH: u8 = 5;
+    const TAG_STRING: u8 = 6;
+    const TAG_WORD: u8 = 7;
+    const TAG_SET_WORD: u8 = 8;
+    const TAG_GET_WORD: u8 = 9;
+}
+
+impl TryFrom<(u8, Word)> for VmValue {
+    type Error = MemoryError;
+
+    fn try_from((tag, addr): (u8, Word)) -> Result<Self, Self::Error> {
+        match tag {
+            VmValue::TAG_NONE => Ok(VmValue::None),
+            VmValue::TAG_INT => Ok(VmValue::Int(addr as i32)),
+            VmValue::TAG_BOOL => Ok(VmValue::Bool(addr != 0)),
+            VmValue::TAG_BLOCK => Ok(VmValue::Block(Addr(addr))),
+            VmValue::TAG_CONTEXT => Ok(VmValue::Context(Addr(addr))),
+            VmValue::TAG_PATH => Ok(VmValue::Path(Addr(addr))),
+            VmValue::TAG_STRING => Ok(VmValue::String(Addr(addr))),
+            VmValue::TAG_WORD => Ok(VmValue::Word(Symbol(Addr(addr)))),
+            VmValue::TAG_SET_WORD => Ok(VmValue::SetWord(Symbol(Addr(addr)))),
+            VmValue::TAG_GET_WORD => Ok(VmValue::GetWord(Symbol(Addr(addr)))),
+            _ => Err(MemoryError::InvalidTag),
+        }
+    }
+}
+
+pub trait Item: Sized {
+    type Error;
+    const SIZE: usize;
+
+    fn load(data: &[u8]) -> Result<Self, Self::Error>;
+}
+
+impl Item for VmValue {
+    type Error = MemoryError;
     const SIZE: usize = 8;
 
-    fn load(data: &[u8]) -> Option<Self> {
-        let a = data[0..4].try_into().ok().map(u32::from_le_bytes)?;
-        let b = data[4..8].try_into().ok().map(u32::from_le_bytes)?;
-        Some([a, b])
+    fn load(data: &[u8]) -> Result<Self, Self::Error> {
+        let addr = data.get(0..4).ok_or(MemoryError::OutOfBounds)?.try_into()?;
+        let addr = u32::from_le_bytes(addr);
+        let tag = data.get(4).copied().ok_or(MemoryError::OutOfBounds)?;
+        (tag, addr).try_into()
     }
 }
 
@@ -24,7 +98,7 @@ pub struct Box(Addr);
 
 impl<'a> Box {
     pub fn open<T: AsRef<[u8]> + ?Sized>(self, memory: &'a T) -> Option<&'a [u8]> {
-        let addr = self.0 as usize;
+        let addr = self.0.as_usize();
         let memory = memory.as_ref();
         let header = memory.get(addr..addr + 4)?;
         let size = header.try_into().ok().map(u32::from_le_bytes)? as usize;
@@ -36,7 +110,7 @@ pub struct Series<'a, I: Item>(&'a [u8], PhantomData<I>);
 
 impl<'a, I> Series<'a, I>
 where
-    I: Item,
+    I: Item<Error = MemoryError>,
 {
     const HEADER_SIZE: usize = 4;
 
@@ -60,12 +134,17 @@ where
             .map(|data| Series(data, PhantomData))
     }
 
-    pub fn get<T: Item>(&self, index: usize) -> Option<T> {
-        let start = T::SIZE * index;
-        self.0.get(start..start + T::SIZE).and_then(T::load)
+    pub fn get(&self, index: usize) -> Result<I, I::Error> {
+        let start = I::SIZE * index;
+        self.0
+            .get(start..start + I::SIZE)
+            .ok_or(MemoryError::OutOfBounds)
+            .and_then(I::load)
     }
 }
 
-pub fn load_series(memory: &[u8], bx: Box, pos: usize) -> Option<[u32; 2]> {
-    Series::<[u32; 2]>::load(memory, bx).and_then(|series| series.get(pos))
+pub fn load_series(memory: &[u8], bx: Box, pos: usize) -> Result<VmValue, MemoryError> {
+    Series::<VmValue>::load(memory, bx)
+        .ok_or(MemoryError::OutOfBounds)
+        .and_then(|series| series.get(pos))
 }
