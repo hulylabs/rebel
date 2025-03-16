@@ -15,7 +15,7 @@ pub enum MemoryError {
 
 type Word = u32;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Addr(Word);
 
 impl Addr {
@@ -26,6 +26,11 @@ impl Addr {
 
 #[derive(Debug)]
 pub struct Symbol(Addr);
+
+type Tag = u8;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemValue(Word, Tag);
 
 #[derive(Debug)]
 pub enum VmValue {
@@ -53,22 +58,23 @@ impl VmValue {
     const TAG_SET_WORD: u8 = 8;
     const TAG_GET_WORD: u8 = 9;
 
-    const fn serialize(&self) -> (Word, u8) {
+    const fn to_mem_value(&self) -> MemValue {
         match self {
-            VmValue::None => (0, VmValue::TAG_NONE),
-            VmValue::Int(value) => (*value as u32, VmValue::TAG_INT),
-            VmValue::Bool(value) => (if *value { 1 } else { 0 }, VmValue::TAG_BOOL),
-            VmValue::Block(addr) => (addr.0, VmValue::TAG_BLOCK),
-            VmValue::Context(addr) => (addr.0, VmValue::TAG_CONTEXT),
-            VmValue::Path(addr) => (addr.0, VmValue::TAG_PATH),
-            VmValue::String(addr) => (addr.0, VmValue::TAG_STRING),
-            VmValue::Word(symbol) => (symbol.0.0, VmValue::TAG_WORD),
-            VmValue::SetWord(symbol) => (symbol.0.0, VmValue::TAG_SET_WORD),
-            VmValue::GetWord(symbol) => (symbol.0.0, VmValue::TAG_GET_WORD),
+            VmValue::None => MemValue(0, VmValue::TAG_NONE),
+            VmValue::Int(value) => MemValue(*value as u32, VmValue::TAG_INT),
+            VmValue::Bool(value) => MemValue(if *value { 1 } else { 0 }, VmValue::TAG_BOOL),
+            VmValue::Block(addr) => MemValue(addr.0, VmValue::TAG_BLOCK),
+            VmValue::Context(addr) => MemValue(addr.0, VmValue::TAG_CONTEXT),
+            VmValue::Path(addr) => MemValue(addr.0, VmValue::TAG_PATH),
+            VmValue::String(addr) => MemValue(addr.0, VmValue::TAG_STRING),
+            VmValue::Word(symbol) => MemValue(symbol.0.0, VmValue::TAG_WORD),
+            VmValue::SetWord(symbol) => MemValue(symbol.0.0, VmValue::TAG_SET_WORD),
+            VmValue::GetWord(symbol) => MemValue(symbol.0.0, VmValue::TAG_GET_WORD),
         }
     }
 
-    const fn deserialize(addr: Word, tag: u8) -> Option<VmValue> {
+    const fn try_from(mem: MemValue) -> Option<VmValue> {
+        let MemValue(addr, tag) = mem;
         match tag {
             VmValue::TAG_NONE => Some(VmValue::None),
             VmValue::TAG_INT => Some(VmValue::Int(addr as i32)),
@@ -85,38 +91,43 @@ impl VmValue {
     }
 }
 
-impl TryFrom<(Word, u8)> for VmValue {
+impl TryFrom<MemValue> for VmValue {
     type Error = MemoryError;
 
-    fn try_from((addr, tag): (Word, u8)) -> Result<Self, Self::Error> {
-        Self::deserialize(addr, tag).ok_or(MemoryError::InvalidTag)
+    fn try_from(mem: MemValue) -> Result<Self, Self::Error> {
+        Self::try_from(mem).ok_or(MemoryError::InvalidTag)
     }
 }
 
 pub trait Item: Sized {
     const SIZE: usize;
 
-    fn load(data: &[u8]) -> Result<Self, MemoryError>;
-    fn store(&self, data: &mut [u8]) -> Result<(), MemoryError>;
+    fn load(data: &[u8]) -> Option<Self>;
+    fn store(self, data: &mut [u8]) -> Option<()>;
 }
 
-impl Item for VmValue {
+impl Item for MemValue {
     const SIZE: usize = 8;
 
-    fn load(data: &[u8]) -> Result<Self, MemoryError> {
-        let addr = data.get(..4).ok_or(MemoryError::OutOfBounds)?;
-        let tag = data.get(4).copied().ok_or(MemoryError::OutOfBounds)?;
-        (u32::from_le_bytes(addr.try_into()?), tag).try_into()
+    fn load(data: &[u8]) -> Option<Self> {
+        let addr = data.get(..4)?;
+        let addr = u32::from_le_bytes(addr.try_into().ok()?);
+        let tag = data.get(4).copied()?;
+        Some(Self(addr, tag))
     }
 
-    fn store(&self, data: &mut [u8]) -> Result<(), MemoryError> {
-        let (addr, tag) = self.serialize();
-        data.get_mut(..4)
-            .ok_or(MemoryError::OutOfBounds)?
-            .copy_from_slice(&addr.to_le_bytes());
-        data.get_mut(4)
-            .map(|tag_byte| *tag_byte = tag)
-            .ok_or(MemoryError::OutOfBounds)
+    fn store(self, data: &mut [u8]) -> Option<()> {
+        let MemValue(addr, tag) = self;
+        let addr_bytes = addr.to_le_bytes();
+        if data.len() < 5 {
+            None
+        } else {
+            for i in 0..4 {
+                data[i] = addr_bytes[i];
+            }
+            data[4] = tag;
+            Some(())
+        }
     }
 }
 
@@ -134,12 +145,9 @@ where
         self.0.is_empty()
     }
 
-    pub fn get(&self, index: usize) -> Result<I, MemoryError> {
+    pub fn get(&self, index: usize) -> Option<I> {
         let start = I::SIZE * index;
-        self.0
-            .get(start..start + I::SIZE)
-            .ok_or(MemoryError::OutOfBounds)
-            .and_then(I::load)
+        self.0.get(start..start + I::SIZE).and_then(I::load)
     }
 }
 
@@ -157,12 +165,9 @@ where
         self.0.is_empty()
     }
 
-    pub fn set(&mut self, index: usize, value: &I) -> Result<(), MemoryError> {
+    pub fn set(&mut self, index: usize, value: I) -> Option<()> {
         let start = I::SIZE * index;
-        let slot = self
-            .0
-            .get_mut(start..start + I::SIZE)
-            .ok_or(MemoryError::OutOfBounds)?;
+        let slot = self.0.get_mut(start..start + I::SIZE)?;
         value.store(slot)
     }
 }
@@ -232,11 +237,18 @@ impl<'a> HeapMut<'a> {
         data.get_mut(addr..addr + words)
             .map(|data| (data, Addr(addr as Word)))
     }
+}
 
-    pub fn alloc_sealed<I: Item>(&mut self, slice: Slice<'a, I>) -> Option<Addr> {
+pub struct Sealed<'a, I: Item>(&'a mut [Word], PhantomData<I>);
+
+impl<'a, I> Sealed<'a, I>
+where
+    I: Item,
+{
+    pub fn alloc(heap: &'a mut HeapMut<'a>, slice: Slice<'a, I>) -> Option<Addr> {
         let bytes = slice.0.len();
         let size_words = (bytes + 3) / 4 + 1;
-        let (sealed, addr) = self.alloc_words(size_words)?;
+        let (sealed, addr) = heap.alloc_words(size_words)?;
 
         let (len, data) = sealed.split_first_mut()?;
         *len = bytes as Word;
@@ -248,26 +260,11 @@ impl<'a> HeapMut<'a> {
 
         Some(addr)
     }
-}
 
-pub struct Sealed<'a, I: Item>(&'a mut [Word], PhantomData<I>);
-
-impl<'a, I> Sealed<'a, I>
-where
-    I: Item,
-{
-    // fn init(data: &'a mut [Word], src: &[u8]) -> Option<Self> {
-    //     let (cap, dst) = data.split_first_mut()?;
-    //     *cap = src.len() as Word;
-    //     let dst = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(dst) };
-    //     dst.copy_from_slice(src);
-    //     Some(Sealed(data, PhantomData))
-    // }
-
-    pub fn load(heap: &HeapMut<'a>, addr: Addr) -> Option<Self> {
+    pub fn load(heap: &'a mut HeapMut<'a>, addr: Addr) -> Option<Self> {
         let len = heap.get_word(addr)?;
         let allocated = (len + 3) / 4 + 1;
-        let data = heap.get(addr, allocated)?;
+        let data = heap.get_mut(addr, allocated)?;
         Some(Sealed(data, PhantomData))
     }
 
@@ -279,7 +276,7 @@ where
         self.len().map(|len| len == 0)
     }
 
-    pub fn items(&self) -> Option<Slice<'a, I>> {
+    pub fn items(self) -> Option<Slice<'a, I>> {
         let (len, data) = self.0.split_first()?;
         let len = *len as usize;
         let data = unsafe { std::mem::transmute::<&[Word], &[u8]>(data) };
@@ -287,17 +284,60 @@ where
         Some(Slice(data, PhantomData))
     }
 
-    // pub fn push(&mut self, item: I) -> Result<(), MemoryError> {
-    //     let (len, data) = self.0.split_first_mut().ok_or(MemoryError::OutOfBounds)?;
-    //     let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
-    //     let addr = *len as usize;
-    //     *len += I::SIZE as Word;
-    //     I::store(&item, &mut data[addr..addr + I::SIZE])
-    // }
+    fn push(&mut self, item: I) -> Option<()> {
+        let (len, data) = self.0.split_first_mut()?;
+        let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
+        let addr = *len as usize;
+        *len += I::SIZE as Word;
+        let slot = data.get_mut(addr..addr + I::SIZE)?;
+        I::store(item, slot)
+    }
 }
 
-pub fn alloc_sealed<'a>(heap: &'a mut HeapMut<'a>, slice: Slice<'a, VmValue>) -> Option<Addr> {
-    heap.alloc_sealed(slice)
+//
+
+pub struct Stack<'a, I: Item>(&'a mut [Word], PhantomData<I>);
+
+impl<'a, I> Stack<'a, I>
+where
+    I: Item,
+{
+    pub fn alloc(heap: &'a mut HeapMut<'a>, items: usize) -> Option<Addr> {
+        let bytes = items * I::SIZE;
+        let size_words = (bytes + 3) / 4 + 2;
+        let (stack, addr) = heap.alloc_words(size_words)?;
+        if stack.len() < 2 {
+            None
+        } else {
+            stack[0] = size_words as Word;
+            stack[1] = 0;
+            Some(addr)
+        }
+    }
+
+    pub fn load(heap: &'a mut HeapMut<'a>, addr: Addr) -> Option<Self> {
+        let cap = heap.get_word(addr)?;
+        let data = heap.get_mut(addr, cap)?;
+        Some(Stack(data, PhantomData))
+    }
+
+    pub fn push(&mut self, item: I) -> Option<()> {
+        let (_, sealed) = self.0.split_first_mut()?;
+        let mut sealed = Sealed::<I>(sealed, PhantomData);
+        sealed.push(item)
+    }
 }
 
-pub fn get_item<'a>(heap: &HeapMut<'a>, addr: Addr, pos: usize) -> Result<VmValue, MemoryError> {}
+//
+
+pub fn alloc_sealed<'a>(heap: &'a mut HeapMut<'a>, slice: Slice<'a, MemValue>) -> Option<Addr> {
+    Sealed::alloc(heap, slice)
+}
+
+pub fn get_sealed_item<'a>(heap: &'a mut HeapMut<'a>, addr: Addr, pos: usize) -> Option<MemValue> {
+    Sealed::load(heap, addr).and_then(Sealed::items)?.get(pos)
+}
+
+pub fn push_item(stack: &mut Stack<MemValue>, item: MemValue) -> Option<()> {
+    stack.push(item)
+}
