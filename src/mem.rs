@@ -310,6 +310,18 @@ impl<'a> Heap<'a> {
         let data = self.get(addr, allocated)?;
         Some(Sealed(data, PhantomData))
     }
+
+    fn drain<I: Item>(&mut self, from: SealedMut<I>, offset: Word) -> Option<Addr> {
+        let (len, data) = from.0.split_first_mut()?;
+        let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
+        let end = *len as usize;
+        *len = offset;
+        let offset = offset as usize;
+        let slice = data
+            .get(offset..end)
+            .map(|data| Slice::<I>(data, PhantomData))?;
+        self.alloc_sealed(slice)
+    }
 }
 
 pub struct Sealed<'a, I>(&'a [Word], PhantomData<I>);
@@ -478,6 +490,15 @@ impl<'a> ParseCollector<'a> {
     fn new(heap: Heap<'a>, parse: Stack<'a, MemValue>, base: Stack<'a, Word>) -> Self {
         Self { heap, parse, base }
     }
+
+    fn begin(&mut self) -> Option<()> {
+        self.parse.len().and_then(|len| self.base.push(len))
+    }
+
+    fn end(&mut self) -> Option<Addr> {
+        let base = self.base.pop()?;
+        self.heap.drain(self.parse.get_sealed_mut()?, base)
+    }
 }
 
 impl<'a> Collector for ParseCollector<'a> {
@@ -506,27 +527,21 @@ impl<'a> Collector for ParseCollector<'a> {
     }
 
     fn begin_block(&mut self) -> Option<()> {
-        self.parse.len().and_then(|len| self.base.push(len))
+        self.begin()
     }
 
     fn end_block(&mut self) -> Option<()> {
-        // let [bp] = self.ops.pop()?;
-        // let block_data = self.parse.pop_all(bp).ok_or(MemoryError::UnexpectedError)?;
-        // let offset = self.module.heap.alloc_block(block_data)?;
-        // self.parse.push([VmValue::TAG_BLOCK, offset])
-        Some(())
+        let block = self.end()?;
+        self.parse.push(MemValue(block.0, VmValue::TAG_BLOCK))
     }
 
     fn begin_path(&mut self) -> Option<()> {
-        self.parse.len().and_then(|len| self.base.push(len))
+        self.begin()
     }
 
     fn end_path(&mut self) -> Option<()> {
-        // let [bp] = self.ops.pop()?;
-        // let block_data = self.parse.pop_all(bp).ok_or(MemoryError::UnexpectedError)?;
-        // let offset = self.module.heap.alloc_block(block_data)?;
-        // self.parse.push([VmValue::TAG_PATH, offset])
-        Some(())
+        let block = self.end()?;
+        self.parse.push(MemValue(block.0, VmValue::TAG_PATH))
     }
 }
 
