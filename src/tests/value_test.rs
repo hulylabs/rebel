@@ -8,21 +8,21 @@ mod tests {
     use super::*;
 
     // Helper function to parse input with ValueCollector and return the result
-    fn parse_to_value(input: &str) -> Result<Value, ParserError<ValueCollectorError>> {
+    fn parse_to_value(input: &str) -> Result<Value, ParserError> {
         let mut collector = ValueCollector::new();
         Parser::parse(input, &mut collector)?;
         collector.value().ok_or(ParserError::UnexpectedError)
     }
 
     // Helper function to parse input as a block with ValueCollector
-    fn parse_block_to_value(input: &str) -> Result<Value, ParserError<ValueCollectorError>> {
+    fn parse_block_to_value(input: &str) -> Result<Value, ParserError> {
         let mut collector = ValueCollector::new();
         Parser::parse_block(input, &mut collector)?;
         collector.value().ok_or(ParserError::UnexpectedError)
     }
 
     #[test]
-    fn test_collector_with_basic_values() -> Result<(), ParserError<ValueCollectorError>> {
+    fn test_collector_with_basic_values() -> Result<(), ParserError> {
         // Test with a string
         let value = parse_to_value(r#"["Hello world"]"#)?;
         assert_eq!(value, Value::block([Value::string("Hello world")]));
@@ -50,7 +50,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collector_with_nested_blocks() -> Result<(), ParserError<ValueCollectorError>> {
+    fn test_collector_with_nested_blocks() -> Result<(), ParserError> {
         let value = parse_to_value("[[nested [deeply [nested]]]]")?;
 
         // Using direct value comparison for the entire nested structure
@@ -66,7 +66,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collector_with_mixed_values() -> Result<(), ParserError<ValueCollectorError>> {
+    fn test_collector_with_mixed_values() -> Result<(), ParserError> {
         let input = r#"[
             42 
             "string" 
@@ -93,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collector_with_paths() -> Result<(), ParserError<ValueCollectorError>> {
+    fn test_collector_with_paths() -> Result<(), ParserError> {
         let value = parse_to_value("[object/property/value]")?;
 
         assert_eq!(
@@ -109,7 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_block_method() -> Result<(), ParserError<ValueCollectorError>> {
+    fn test_parse_block_method() -> Result<(), ParserError> {
         // Test the parse_block method which automatically wraps input in a block
         let value = parse_block_to_value(r#"word 123 "string""#)?;
 
@@ -126,7 +126,7 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_block() -> Result<(), ParserError<ValueCollectorError>> {
+    fn test_empty_block() -> Result<(), ParserError> {
         let value = parse_to_value("[]")?;
         assert_eq!(value, Value::block([]));
 
@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_nested_paths() -> Result<(), ParserError<ValueCollectorError>> {
+    fn test_multiple_nested_paths() -> Result<(), ParserError> {
         let value = parse_to_value("[system/console/write system/console/read-line]")?;
 
         assert_eq!(
@@ -157,7 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn test_form_method() -> Result<(), ParserError<ValueCollectorError>> {
+    fn test_form_method() -> Result<(), ParserError> {
         // Test that form produces the expected string representation
         let value = parse_to_value(r#"[1 "hello" word]"#)?;
         assert_eq!(value.form(), "1 hello word");

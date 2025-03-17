@@ -349,33 +349,30 @@ impl Default for ValueCollector {
 impl Collector for ValueCollector {
     type Error = ValueCollectorError;
 
-    fn string(&mut self, string: &str) -> Result<(), Self::Error> {
-        self.push_value(Value::string(string));
-        Ok(())
+    fn string(&mut self, string: &str) -> Option<()> {
+        Some(self.push_value(Value::string(string)))
     }
 
-    fn word(&mut self, kind: WordKind, word: &str) -> Result<(), Self::Error> {
+    fn word(&mut self, kind: WordKind, word: &str) -> Option<()> {
         let value = match kind {
             WordKind::Word => Value::word(word),
             WordKind::SetWord => Value::set_word(word),
             WordKind::GetWord => Value::get_word(word),
         };
-        self.push_value(value);
-        Ok(())
+        Some(self.push_value(value))
     }
 
-    fn integer(&mut self, value: i32) -> Result<(), Self::Error> {
-        self.push_value(Value::int(value));
-        Ok(())
+    fn integer(&mut self, value: i32) -> Option<()> {
+        Some(self.push_value(Value::int(value)))
     }
 
-    fn begin_block(&mut self) -> Result<(), Self::Error> {
+    fn begin_block(&mut self) -> Option<()> {
         self.stack.push(Vec::new());
         self.path_stack.push(false);
-        Ok(())
+        Some(())
     }
 
-    fn end_block(&mut self) -> Result<(), Self::Error> {
+    fn end_block(&mut self) -> Option<()> {
         if let Some(values) = self.stack.pop() {
             self.path_stack.pop();
             let block = Value::block(values);
@@ -385,22 +382,22 @@ impl Collector for ValueCollector {
             } else {
                 self.push_value(block);
             }
-            Ok(())
+            Some(())
         } else {
-            Err(ValueCollectorError::UnmatchedEndBlock)
+            None
         }
     }
 
-    fn begin_path(&mut self) -> Result<(), Self::Error> {
+    fn begin_path(&mut self) -> Option<()> {
         self.stack.push(Vec::new());
         self.path_stack.push(true);
-        Ok(())
+        Some(())
     }
 
-    fn end_path(&mut self) -> Result<(), Self::Error> {
+    fn end_path(&mut self) -> Option<()> {
         if let Some(values) = self.stack.pop() {
             if self.path_stack.pop() != Some(true) {
-                return Err(ValueCollectorError::PathBlockMismatch);
+                return None;
             }
 
             let path = Value::path(values);
@@ -410,9 +407,9 @@ impl Collector for ValueCollector {
             } else {
                 self.push_value(path);
             }
-            Ok(())
+            Some(())
         } else {
-            Err(ValueCollectorError::UnmatchedEndPath)
+            None
         }
     }
 }

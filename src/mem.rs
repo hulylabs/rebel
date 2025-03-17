@@ -1,7 +1,7 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
 use crate::parse::{Collector, WordKind};
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Div};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -15,6 +15,30 @@ pub enum MemoryError {
 }
 
 type Word = u32;
+
+fn write_word(data: &mut [u8], value: Word) -> Option<()> {
+    if data.len() < 4 {
+        None
+    } else {
+        data[0] = value as u8;
+        data[1] = (value >> 8) as u8;
+        data[2] = (value >> 16) as u8;
+        data[3] = (value >> 24) as u8;
+        Some(())
+    }
+}
+
+fn read_word(data: &[u8]) -> Option<Word> {
+    if data.len() < 4 {
+        None
+    } else {
+        let result = data[0] as u32
+            | (data[1] as u32) << 8
+            | (data[2] as u32) << 16
+            | (data[3] as u32) << 24;
+        Some(result)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Addr(Word);
@@ -238,6 +262,11 @@ impl<'a> Heap<'a> {
         self.0.get(addr.as_usize() + 1).copied()
     }
 
+    fn get(&self, addr: Addr, len: Word) -> Option<&[Word]> {
+        let addr = addr.as_usize() + 1;
+        self.0.get(addr..addr + len as usize)
+    }
+
     fn get_mut(&mut self, addr: Addr, len: Word) -> Option<&mut [Word]> {
         let addr = addr.as_usize() + 1;
         self.0.get_mut(addr..addr + len as usize)
@@ -270,40 +299,51 @@ impl<'a> Heap<'a> {
     pub fn alloc_string(&mut self, string: &str) -> Option<Addr> {
         self.alloc_raw(string.as_bytes())
     }
+
+    pub fn alloc_sealed<I: Item>(&mut self, slice: Slice<I>) -> Option<Addr> {
+        self.alloc_raw(slice.0)
+    }
+
+    pub fn load_sealed<I: Item>(&self, addr: Addr) -> Option<Sealed<I>> {
+        let len = self.get_word(addr)?;
+        let allocated = (len + 3) / 4 + 1;
+        let data = self.get(addr, allocated)?;
+        Some(Sealed(data, PhantomData))
+    }
 }
 
-pub struct Sealed<'a, I: Item>(&'a mut [Word], PhantomData<I>);
+pub struct Sealed<'a, I>(&'a [Word], PhantomData<I>);
 
 impl<'a, I> Sealed<'a, I>
 where
     I: Item,
 {
-    pub fn alloc(heap: &'a mut Heap<'a>, slice: Slice<'a, I>) -> Option<Addr> {
-        // let bytes = slice.0.len();
-        // let size_words = (bytes + 3) / 4 + 1;
-        // let (sealed, addr) = heap.alloc_words(size_words)?;
+    // pub fn alloc(heap: &'a mut Heap<'a>, slice: Slice<'a, I>) -> Option<Addr> {
+    // let bytes = slice.0.len();
+    // let size_words = (bytes + 3) / 4 + 1;
+    // let (sealed, addr) = heap.alloc_words(size_words)?;
 
-        // let (len, data) = sealed.split_first_mut()?;
-        // *len = bytes as Word;
-        // let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
+    // let (len, data) = sealed.split_first_mut()?;
+    // *len = bytes as Word;
+    // let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
 
-        // for (src, dst) in slice.0.iter().zip(data.iter_mut()) {
-        //     *dst = *src;
-        // }
+    // for (src, dst) in slice.0.iter().zip(data.iter_mut()) {
+    //     *dst = *src;
+    // }
 
-        // Some(addr)
-        heap.alloc_raw(slice.0)
-    }
+    // Some(addr)
+    //     heap.alloc_raw(slice.0)
+    // }
 
-    pub fn load(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Self> {
-        let len = heap.get_word(addr)?;
-        let allocated = (len + 3) / 4 + 1;
-        let data = heap.get_mut(addr, allocated)?;
-        Some(Sealed(data, PhantomData))
-    }
+    // pub fn load(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Self> {
+    //     let len = heap.get_word(addr)?;
+    //     let allocated = (len + 3) / 4 + 1;
+    //     let data = heap.get_mut(addr, allocated)?;
+    //     Some(Sealed(data, PhantomData))
+    // }
 
     pub fn len(&self) -> Option<usize> {
-        self.0.first().map(|len| *len as usize)
+        self.0.as_ref().first().map(|len| *len as usize)
     }
 
     pub fn is_empty(&self) -> Option<bool> {
@@ -311,15 +351,22 @@ where
     }
 
     pub fn items(self) -> Option<Slice<'a, I>> {
-        let (len, data) = self.0.split_first()?;
+        let (len, data) = self.0.as_ref().split_first()?;
         let len = *len as usize;
         let data = unsafe { std::mem::transmute::<&[Word], &[u8]>(data) };
         let data = data.get(..len)?;
         Some(Slice(data, PhantomData))
     }
+}
 
+pub struct SealedMut<'a, I>(&'a mut [Word], PhantomData<I>);
+
+impl<'a, I> SealedMut<'a, I>
+where
+    I: Item,
+{
     fn push(&mut self, item: I) -> Option<()> {
-        let (len, data) = self.0.split_first_mut()?;
+        let (len, data) = self.0.as_mut().split_first_mut()?;
         let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
         let addr = *len as usize;
         *len += I::SIZE as Word;
@@ -328,7 +375,7 @@ where
     }
 
     fn pop(&mut self) -> Option<I> {
-        let (len, data) = self.0.split_first_mut()?;
+        let (len, data) = self.0.as_mut().split_first_mut()?;
         let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
         let addr = len.checked_sub(I::SIZE as Word)?;
         *len = addr;
@@ -364,17 +411,21 @@ where
         Some(Stack(data, PhantomData))
     }
 
-    fn get_sealed<'b>(&'b mut self) -> Option<Sealed<'b, I>> {
+    pub fn len(&self) -> Option<Word> {
+        self.0.get(1).map(|len| len.div(I::SIZE as Word))
+    }
+
+    fn get_sealed_mut(&mut self) -> Option<SealedMut<I>> {
         let (_, sealed) = self.0.split_first_mut()?;
-        Some(Sealed(sealed, PhantomData))
+        Some(SealedMut(sealed, PhantomData))
     }
 
     pub fn push(&mut self, item: I) -> Option<()> {
-        self.get_sealed()?.push(item)
+        self.get_sealed_mut()?.push(item)
     }
 
     pub fn pop(&mut self) -> Option<I> {
-        self.get_sealed()?.pop()
+        self.get_sealed_mut()?.pop()
     }
 }
 
@@ -401,34 +452,44 @@ where
     // fn parse(&mut self, input: &str) -> Option<()> {}
 }
 
+//
+
+impl Item for Word {
+    const SIZE: usize = 4;
+
+    fn load(data: &[u8]) -> Option<Self> {
+        read_word(data)
+    }
+
+    fn store(self, data: &mut [u8]) -> Option<()> {
+        write_word(data, self)
+    }
+}
+
 // P A R S E  C O L L E C T O R
 
 struct ParseCollector<'a> {
     heap: Heap<'a>,
     parse: Stack<'a, MemValue>,
+    base: Stack<'a, Word>,
 }
 
 impl<'a> ParseCollector<'a> {
-    fn new(heap: Heap<'a>, parse: Stack<'a, MemValue>) -> Self {
-        Self { heap, parse }
+    fn new(heap: Heap<'a>, parse: Stack<'a, MemValue>, base: Stack<'a, Word>) -> Self {
+        Self { heap, parse, base }
     }
 }
 
 impl<'a> Collector for ParseCollector<'a> {
     type Error = MemoryError;
 
-    fn string(&mut self, string: &str) -> Result<(), Self::Error> {
-        let addr = self
-            .heap
-            .alloc_string(string)
-            .ok_or(MemoryError::OutOfBounds)?;
-        self.parse
-            .push(MemValue(addr.0, VmValue::TAG_STRING))
-            .ok_or(MemoryError::OutOfBounds)
+    fn string(&mut self, string: &str) -> Option<()> {
+        let addr = self.heap.alloc_string(string)?;
+        self.parse.push(MemValue(addr.0, VmValue::TAG_STRING))
     }
 
-    fn word(&mut self, kind: WordKind, word: &str) -> Result<(), Self::Error> {
-        Ok(())
+    fn word(&mut self, kind: WordKind, word: &str) -> Option<()> {
+        Some(())
         // self.module.get_or_insert_symbol(word).and_then(|id| {
         //     let value = match kind {
         //         WordKind::Word => VmValue::Word(id),
@@ -439,46 +500,46 @@ impl<'a> Collector for ParseCollector<'a> {
         // })
     }
 
-    fn integer(&mut self, value: i32) -> Result<(), MemoryError> {
-        let mem_value = MemValue(value as Word, VmValue::TAG_INT);
-        self.parse.push(mem_value).ok_or(MemoryError::OutOfBounds)
+    fn integer(&mut self, value: i32) -> Option<()> {
+        let mem = MemValue(value as Word, VmValue::TAG_INT);
+        self.parse.push(mem)
     }
 
-    fn begin_block(&mut self) -> Result<(), MemoryError> {
+    fn begin_block(&mut self) -> Option<()> {
         // self.parse.len().and_then(|len| self.ops.push([len]))
-        Ok(())
+        Some(())
     }
 
-    fn end_block(&mut self) -> Result<(), MemoryError> {
+    fn end_block(&mut self) -> Option<()> {
         // let [bp] = self.ops.pop()?;
         // let block_data = self.parse.pop_all(bp).ok_or(MemoryError::UnexpectedError)?;
         // let offset = self.module.heap.alloc_block(block_data)?;
         // self.parse.push([VmValue::TAG_BLOCK, offset])
-        Ok(())
+        Some(())
     }
 
-    fn begin_path(&mut self) -> Result<(), Self::Error> {
-        // self.parse.len().and_then(|len| self.ops.push([len]))
-        Ok(())
+    fn begin_path(&mut self) -> Option<()> {
+        self.parse.len().and_then(|len| self.base.push(len))
     }
 
-    fn end_path(&mut self) -> Result<(), Self::Error> {
+    fn end_path(&mut self) -> Option<()> {
         // let [bp] = self.ops.pop()?;
         // let block_data = self.parse.pop_all(bp).ok_or(MemoryError::UnexpectedError)?;
         // let offset = self.module.heap.alloc_block(block_data)?;
         // self.parse.push([VmValue::TAG_PATH, offset])
-        Ok(())
+        Some(())
     }
 }
 
 //
 
 pub fn alloc_sealed<'a>(heap: &'a mut Heap<'a>, slice: Slice<'a, MemValue>) -> Option<Addr> {
-    Sealed::alloc(heap, slice)
+    // Sealed::alloc(heap, slice)
+    heap.alloc_sealed(slice)
 }
 
-pub fn get_sealed_item<'a>(heap: &'a mut Heap<'a>, addr: Addr, pos: usize) -> Option<MemValue> {
-    Sealed::load(heap, addr).and_then(Sealed::items)?.get(pos)
+pub fn get_sealed_item<'a>(heap: &'a Heap<'a>, addr: Addr, pos: usize) -> Option<MemValue> {
+    heap.load_sealed(addr).and_then(Sealed::items)?.get(pos)
 }
 
 pub fn push_item<'a>(heap: &'a mut Heap<'a>, addr: Addr, item: MemValue) -> Option<()> {
@@ -490,7 +551,7 @@ pub fn pop_item<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<MemValue> {
 }
 
 pub fn sealed_load<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Sealed<'a, MemValue>> {
-    Sealed::load(heap, addr)
+    heap.load_sealed(addr)
 }
 
 pub fn stack_load<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Stack<'a, MemValue>> {

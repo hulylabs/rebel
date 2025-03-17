@@ -25,7 +25,7 @@ use thiserror::Error;
 
 /// Errors that can occur during parsing
 #[derive(Debug, Error)]
-pub enum ParserError<E> {
+pub enum ParserError {
     /// Input ended unexpectedly
     #[error("end of input")]
     EndOfInput,
@@ -42,8 +42,8 @@ pub enum ParserError<E> {
     #[error("empty word")]
     EmptyWord,
     /// Error propagated from the collector
-    #[error(transparent)]
-    CollectorError(#[from] E),
+    #[error("collector error")]
+    CollectorError,
 }
 
 /// Types of word tokens
@@ -66,25 +66,25 @@ pub trait Collector {
     type Error;
 
     /// Called when a string is parsed
-    fn string(&mut self, string: &str) -> Result<(), Self::Error>;
+    fn string(&mut self, string: &str) -> Option<()>;
 
     /// Called when a word is parsed
-    fn word(&mut self, kind: WordKind, word: &str) -> Result<(), Self::Error>;
+    fn word(&mut self, kind: WordKind, word: &str) -> Option<()>;
 
     /// Called when an integer is parsed
-    fn integer(&mut self, value: i32) -> Result<(), Self::Error>;
+    fn integer(&mut self, value: i32) -> Option<()>;
 
     /// Called at the start of a block
-    fn begin_block(&mut self) -> Result<(), Self::Error>;
+    fn begin_block(&mut self) -> Option<()>;
 
     /// Called at the end of a block
-    fn end_block(&mut self) -> Result<(), Self::Error>;
+    fn end_block(&mut self) -> Option<()>;
 
     /// Called at the start of a path
-    fn begin_path(&mut self) -> Result<(), Self::Error>;
+    fn begin_path(&mut self) -> Option<()>;
 
     /// Called at the end of a path
-    fn end_path(&mut self) -> Result<(), Self::Error>;
+    fn end_path(&mut self) -> Option<()>;
 }
 
 /// Parser for REBOL-inspired language tokens
@@ -136,30 +136,30 @@ where
     /// # struct MyCollector;
     /// # impl Collector for MyCollector {
     /// #     type Error = ();
-    /// #     fn string(&mut self, _: &str) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn word(&mut self, _: WordKind, _: &str) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn integer(&mut self, _: i32) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn begin_block(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn end_block(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn begin_path(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn end_path(&mut self) -> Result<(), Self::Error> { Ok(()) }
+    /// #     fn string(&mut self, _: &str) -> Option<()> { Some(()) }
+    /// #     fn word(&mut self, _: WordKind, _: &str) -> Option<()> { Some(()) }
+    /// #     fn integer(&mut self, _: i32) -> Option<()> { Some(()) }
+    /// #     fn begin_block(&mut self) -> Option<()> { Some(()) }
+    /// #     fn end_block(&mut self) -> Option<()> { Some(()) }
+    /// #     fn begin_path(&mut self) -> Option<()> { Some(()) }
+    /// #     fn end_path(&mut self) -> Option<()> { Some(()) }
     /// # }
     /// # let mut collector = MyCollector;
     /// // Note: Input content isn't inside brackets, but will be treated as a block
     /// let input = "word 123 \"string\"";
     /// Parser::parse_block(input, &mut collector).expect("Failed to parse block");
     /// ```
-    pub fn parse_block(input: &'a str, collector: &'a mut C) -> Result<(), ParserError<C::Error>> {
+    pub fn parse_block(input: &'a str, collector: &'a mut C) -> Result<(), ParserError> {
         let mut parser = Self::new(input, collector);
         parser
             .collector
             .begin_block()
-            .map_err(ParserError::CollectorError)?;
+            .ok_or(ParserError::CollectorError)?;
         parser.do_parse()?;
         parser
             .collector
             .end_block()
-            .map_err(ParserError::CollectorError)
+            .ok_or(ParserError::CollectorError)
     }
 
     /// Parse input directly with a collector
@@ -185,19 +185,19 @@ where
     /// # struct MyCollector;
     /// # impl Collector for MyCollector {
     /// #     type Error = ();
-    /// #     fn string(&mut self, _: &str) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn word(&mut self, _: WordKind, _: &str) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn integer(&mut self, _: i32) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn begin_block(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn end_block(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn begin_path(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    /// #     fn end_path(&mut self) -> Result<(), Self::Error> { Ok(()) }
+    /// #     fn string(&mut self, _: &str) -> Option<()> { Some(()) }
+    /// #     fn word(&mut self, _: WordKind, _: &str) -> Option<()> { Some(()) }
+    /// #     fn integer(&mut self, _: i32) -> Option<()> { Some(()) }
+    /// #     fn begin_block(&mut self) -> Option<()> { Some(()) }
+    /// #     fn end_block(&mut self) -> Option<()> { Some(()) }
+    /// #     fn begin_path(&mut self) -> Option<()> { Some(()) }
+    /// #     fn end_path(&mut self) -> Option<()> { Some(()) }
     /// # }
     /// # let mut collector = MyCollector;
     /// let input = "[word 123 \"string\"]";
     /// Parser::parse(input, &mut collector).expect("Failed to parse");
     /// ```
-    pub fn parse(input: &'a str, collector: &'a mut C) -> Result<(), ParserError<C::Error>> {
+    pub fn parse(input: &'a str, collector: &'a mut C) -> Result<(), ParserError> {
         let mut parser = Self::new(input, collector);
         parser.do_parse()
     }
@@ -221,7 +221,7 @@ where
         None
     }
 
-    fn parse_string(&mut self, pos: usize) -> Result<Option<char>, ParserError<C::Error>> {
+    fn parse_string(&mut self, pos: usize) -> Result<Option<char>, ParserError> {
         let _start_pos = pos + 1; // Skip the opening quote
         let mut result = String::new();
         let mut escaped = false;
@@ -247,7 +247,7 @@ where
                     .collector
                     .string(&result)
                     .map(|()| None)
-                    .map_err(ParserError::CollectorError);
+                    .ok_or(ParserError::CollectorError);
             } else {
                 result.push(char);
             }
@@ -262,17 +262,17 @@ where
         symbol: &str,
         kind: WordKind,
         consumed: Option<char>,
-    ) -> Result<Option<char>, C::Error> {
+    ) -> Option<Option<char>> {
         if let Some('/') = consumed {
             if !self.in_path {
                 self.in_path = true;
-                self.collector.begin_path()?;
+                self.collector.begin_path()?
             }
         }
         self.collector.word(kind, symbol).map(|_| consumed)
     }
 
-    fn parse_word(&mut self, start_pos: usize) -> Result<Option<char>, ParserError<C::Error>> {
+    fn parse_word(&mut self, start_pos: usize) -> Result<Option<char>, ParserError> {
         let mut kind = WordKind::Word;
         let mut word_start = start_pos;
 
@@ -311,10 +311,10 @@ where
             .ok_or(ParserError::UnexpectedError)?;
 
         self.collect_word(symbol, kind, consumed)
-            .map_err(ParserError::CollectorError)
+            .ok_or(ParserError::CollectorError)
     }
 
-    fn parse_number(&mut self, char: char) -> Result<Option<char>, ParserError<C::Error>> {
+    fn parse_number(&mut self, char: char) -> Result<Option<char>, ParserError> {
         let mut value: i32 = 0;
         let mut is_negative = false;
         let mut has_digits = false;
@@ -358,10 +358,10 @@ where
         self.collector
             .integer(value)
             .map(|_| consumed)
-            .map_err(ParserError::CollectorError)
+            .ok_or(ParserError::CollectorError)
     }
 
-    fn process_block_end(&mut self, consumed: Option<char>) -> Result<(), C::Error> {
+    fn process_block_end(&mut self, consumed: Option<char>) -> Option<()> {
         match consumed {
             Some('/') => {}
             _ => {
@@ -374,17 +374,17 @@ where
         if let Some(']') = consumed {
             self.collector.end_block()?;
         }
-        Ok(())
+        Some(())
     }
 
-    fn do_parse(&mut self) -> Result<(), ParserError<C::Error>> {
+    fn do_parse(&mut self) -> Result<(), ParserError> {
         while let Some((pos, char)) = self.skip_whitespace() {
             let consumed = match char {
                 '[' => self
                     .collector
                     .begin_block()
                     .map(|()| None)
-                    .map_err(ParserError::CollectorError)?,
+                    .ok_or(ParserError::CollectorError)?,
                 ']' => Some(char),
                 '"' => self.parse_string(pos)?,
                 ':' => self.parse_word(pos)?, // Special handling for get-words
@@ -393,7 +393,7 @@ where
                 _ => return Err(ParserError::UnexpectedChar(char)),
             };
             self.process_block_end(consumed)
-                .map_err(ParserError::CollectorError)?;
+                .ok_or(ParserError::CollectorError)?;
         }
         Ok(())
     }
