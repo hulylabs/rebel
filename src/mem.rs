@@ -343,7 +343,7 @@ where
     // }
 
     pub fn len(&self) -> Option<usize> {
-        self.0.as_ref().first().map(|len| *len as usize)
+        self.0.first().map(|len| *len as usize)
     }
 
     pub fn is_empty(&self) -> Option<bool> {
@@ -351,7 +351,7 @@ where
     }
 
     pub fn items(self) -> Option<Slice<'a, I>> {
-        let (len, data) = self.0.as_ref().split_first()?;
+        let (len, data) = self.0.split_first()?;
         let len = *len as usize;
         let data = unsafe { std::mem::transmute::<&[Word], &[u8]>(data) };
         let data = data.get(..len)?;
@@ -366,7 +366,7 @@ where
     I: Item,
 {
     fn push(&mut self, item: I) -> Option<()> {
-        let (len, data) = self.0.as_mut().split_first_mut()?;
+        let (len, data) = self.0.split_first_mut()?;
         let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
         let addr = *len as usize;
         *len += I::SIZE as Word;
@@ -375,7 +375,7 @@ where
     }
 
     fn pop(&mut self) -> Option<I> {
-        let (len, data) = self.0.as_mut().split_first_mut()?;
+        let (len, data) = self.0.split_first_mut()?;
         let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
         let addr = len.checked_sub(I::SIZE as Word)?;
         *len = addr;
@@ -506,8 +506,7 @@ impl<'a> Collector for ParseCollector<'a> {
     }
 
     fn begin_block(&mut self) -> Option<()> {
-        // self.parse.len().and_then(|len| self.ops.push([len]))
-        Some(())
+        self.parse.len().and_then(|len| self.base.push(len))
     }
 
     fn end_block(&mut self) -> Option<()> {

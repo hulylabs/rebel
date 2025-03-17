@@ -398,5 +398,3 @@ where
         Ok(())
     }
 }
-
-// Tests have been moved to src/tests/parser_test.rs
