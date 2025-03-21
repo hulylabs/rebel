@@ -481,13 +481,13 @@ impl Item for Word {
 // P A R S E  C O L L E C T O R
 
 struct ParseCollector<'a> {
-    heap: Heap<'a>,
+    heap: &'a mut Heap<'a>,
     parse: Stack<'a, MemValue>,
     base: Stack<'a, Word>,
 }
 
 impl<'a> ParseCollector<'a> {
-    fn new(heap: Heap<'a>, parse: Stack<'a, MemValue>, base: Stack<'a, Word>) -> Self {
+    fn new(heap: &'a mut Heap<'a>, parse: Stack<'a, MemValue>, base: Stack<'a, Word>) -> Self {
         Self { heap, parse, base }
     }
 
@@ -501,7 +501,7 @@ impl<'a> ParseCollector<'a> {
     }
 }
 
-impl<'a> Collector for ParseCollector<'a> {
+impl Collector for ParseCollector<'_> {
     type Error = MemoryError;
 
     fn string(&mut self, string: &str) -> Option<()> {
@@ -571,3 +571,11 @@ pub fn sealed_load<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Sealed<'a, 
 pub fn stack_load<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Stack<'a, MemValue>> {
     Stack::load(heap, addr)
 }
+
+// pub fn parse<'a>(heap: &'a mut Heap<'a>, input: &str) -> Option<()> {
+//     let parse = Stack::<MemValue>::alloc(heap, 100)?;
+//     let base = Stack::<Word>::alloc(heap, 20)?;
+//     let mut collector =
+//         ParseCollector::new(heap, Stack::load(heap, parse)?, Stack::load(heap, base)?);
+//     crate::parse::Parser::parse(input, &mut collector).ok()
+// }
