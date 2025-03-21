@@ -1,0 +1,103 @@
+# Rebel Project Rules and Patterns
+
+## Coding Patterns
+
+### Rust Idioms
+- Use Rust's type system extensively to ensure memory safety
+- Prefer Option<T> returns for operations that might fail
+- Implement traits for common behavior patterns
+- Use the `thiserror` crate for Error enum definitions
+
+### Memory Management
+- The project uses custom memory management rather than relying solely on Rust's standard allocator
+- Tagged values (MemValue) combine a Word (u32) with a Tag (u8) for efficient type identification
+- Memory operations should be abstracted behind safe interfaces
+- Use Slice and SliceMut abstractions for memory access
+
+### Error Handling
+- Parser errors use the ParserError enum
+- Memory errors use the MemoryError enum 
+- Value collector errors use the ValueCollectorError enum
+- All errors implement the Error trait via thiserror
+
+### Value System
+- Values are represented as an enum in Rust code
+- Low-level representation uses tagged union approach
+- Provide helper methods for type checking and conversion
+
+## Project Preferences
+
+### Documentation Style
+- Use descriptive doc comments for public interfaces
+- Include examples in documentation where appropriate
+- Document unsafe code blocks extensively
+- Comment complex algorithms with step-by-step explanations
+
+### Testing Approach
+- Write test helpers to simplify test cases
+- Test both success and error paths
+- Include tests for edge cases and boundary conditions
+- Organize related tests in submodules
+
+### Code Structure
+- Keep modules focused on a single responsibility
+- Separate interface from implementation
+- Use traits for abstraction boundaries
+- Minimize public API surface
+
+## Critical Implementation Paths
+
+### Parsing Flow
+1. Create a Parser instance with input and collector
+2. Parser processes input character by character
+3. Parser calls collector methods as tokens are recognized
+4. Collector builds data structures based on parser events
+
+### Value Building Flow
+1. ValueCollector implements Collector trait
+2. ValueCollector maintains a stack for nested structures
+3. End block/path operations pop from stack and build composite values
+4. Final result available via value() method
+
+### Memory Operations Flow
+1. Heap manages memory allocation
+2. Stack provides push/pop operations
+3. Slice/SliceMut provide safe access to memory regions
+4. Item trait defines how types are stored in memory
+
+## Known Challenges
+
+### Balancing Abstraction
+- The project uses multiple representations (Value/MemValue) that must be kept in sync
+- Each abstraction layer adds overhead but improves safety
+- Finding the right balance is an ongoing consideration
+
+### Memory Safety
+- Custom memory management requires careful handling
+- Unsafe code blocks should be minimal and well-tested
+- Memory operations should validate bounds
+
+### Parser Edge Cases
+- String escaping needs careful handling
+- Nested structures require proper stack management
+- Error recovery should be graceful
+
+## Project Evolution Tracking
+
+### Current Phase: Foundation Building
+- Core parsing functionality
+- Basic value representation
+- Memory management primitives
+- Test infrastructure
+
+### Next Phase: VM Development
+- Execution engine
+- Context/environment model
+- Function implementation
+- Basic standard library
+
+### Future Phase: Process Model
+- Process abstraction
+- Interprocess communication
+- Persistence mechanisms
+- Enhanced concurrency
