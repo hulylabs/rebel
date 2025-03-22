@@ -1,8 +1,9 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
 use crate::parse::{Collector, WordKind};
-use std::marker::PhantomData;
+use std::{marker::PhantomData, mem};
 use thiserror::Error;
+use xxhash_rust::const_xxh32::xxh32;
 
 #[derive(Debug, Error)]
 pub enum MemoryError {
@@ -64,15 +65,19 @@ impl LenAddress {
 struct CapAddress(Offset);
 
 impl CapAddress {
-    // fn get_cap(&self, memory: &Memory) -> Option<usize> {
-    //     let address = self.address();
-    //     memory
-    //         .get(address, address + 4)?
-    //         .try_into()
-    //         .ok()
-    //         .map(u32::from_le_bytes)
-    //         .map(|x| x as usize)
-    // }
+    fn init(&self, cap: Offset, memory: &mut Memory) -> Option<()> {
+        let data_cap = cap.checked_sub(8)?;
+        self.set_cap(data_cap, memory)?;
+        self.len_address().set_len(0, memory)?;
+        Some(())
+    }
+
+    fn get_cap(&self, memory: &Memory) -> Option<Word> {
+        memory
+            .get(self.address(), 4)
+            .and_then(|slot| slot.try_into().ok())
+            .map(u32::from_le_bytes)
+    }
 
     fn set_cap(&self, cap: Offset, memory: &mut Memory) -> Option<()> {
         memory
@@ -115,9 +120,9 @@ impl CapAddress {
     }
 
     fn alloc_cap(&self, size: Offset, memory: &mut Memory) -> Option<CapAddress> {
-        let cap = self.reserve_slot(size + 8, memory).map(CapAddress)?;
-        cap.set_cap(size, memory)?;
-        cap.len_address().set_len(0, memory)?;
+        let to_allocate = size + 8;
+        let cap = self.reserve_slot(to_allocate, memory).map(CapAddress)?;
+        cap.init(to_allocate, memory)?;
         Some(cap)
     }
 
@@ -134,7 +139,6 @@ impl CapAddress {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
 pub struct Stack<I>(CapAddress, PhantomData<I>);
 
 impl<I> Stack<I>
@@ -208,7 +212,19 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+pub struct Str(LenAddress);
+
+impl Str {
+    pub fn len(&self, memory: &Memory) -> Option<Word> {
+        self.0.get_len(memory)
+    }
+
+    pub fn as_bytes<'a>(&self, memory: &'a Memory) -> Option<&'a [u8]> {
+        let len = self.len(memory)?;
+        memory.get(self.0.data_address(), len)
+    }
+}
+
 pub struct Arena(CapAddress);
 
 impl Arena {
@@ -224,8 +240,55 @@ impl Arena {
         self.0.alloc_len(data, memory).map(Block::new)
     }
 
-    pub fn alloc_string(&self, memory: &mut Memory, string: &str) -> Option<Block<u8>> {
-        self.alloc_block(memory, string.as_bytes())
+    pub fn alloc_string(&self, memory: &mut Memory, string: &str) -> Option<Str> {
+        self.0.alloc_len(string.as_bytes(), memory).map(Str)
+    }
+}
+
+pub struct SymbolTable(CapAddress);
+
+impl SymbolTable {
+    const HASH_SEED: u32 = 0xC0FFEE;
+
+    fn get_or_insert_symbol(
+        &self,
+        symbol: &str,
+        heap: Arena,
+        memory: &mut Memory,
+    ) -> Option<LenAddress> {
+        let cap_bytes = self.0.get_cap(memory)?;
+        let len_address = self.0.len_address();
+        let count = len_address.get_len(memory)?;
+
+        let bytes = symbol.as_bytes();
+        let hash = xxh32(bytes, Self::HASH_SEED);
+
+        let cap = (cap_bytes - 8) / 4;
+
+        let start = hash % cap;
+        let mut index = start;
+        loop {
+            let entry_addr = self.0.data_address() + index * 4;
+            let entry = memory.read_u32(entry_addr)?;
+
+            if entry == 0 {
+                let str = heap.alloc_string(memory, symbol)?;
+                let address = str.0;
+                memory.write_u32(entry_addr, address.0)?;
+                len_address.set_len(count + 1, memory)?;
+                return Some(address);
+            }
+
+            let stored = Str(LenAddress(entry));
+            if stored.as_bytes(memory)? == bytes {
+                return Some(stored.0);
+            }
+
+            index = (index + 1) % cap;
+            if index == start {
+                return None;
+            }
+        }
     }
 }
 
@@ -234,8 +297,32 @@ pub struct Memory<'a> {
 }
 
 impl<'a> Memory<'a> {
-    pub fn new(memory: &'a mut [u8]) -> Self {
+    const LAYOUT_SYMBOL_TABLE: u32 = 0;
+    const LAYOUT_PARSE_STACK: u32 = 1;
+    const LAYOUT_PARSE_BASE: u32 = 2;
+    const LAYOUT_HEAP: u32 = 3;
+
+    const LAYOUT_REGIONS: u32 = 4;
+
+    pub fn init(memory: &'a mut [u8], sizes: [Offset; 4]) -> Self {
+        let mut addr: u32 = 0;
+        for &size in sizes.iter() {
+            let cap = CapAddress(addr);
+            cap.set_cap(size, &mut Self { memory });
+            addr += size;
+        }
+
         Self { memory }
+    }
+
+    fn read_u32(&self, offset: Offset) -> Option<u32> {
+        self.get(offset, 4)?.try_into().ok().map(u32::from_le_bytes)
+    }
+
+    fn write_u32(&mut self, offset: Offset, value: u32) -> Option<()> {
+        let bytes = value.to_le_bytes();
+        self.get_mut(offset, 4)?.copy_from_slice(&bytes);
+        Some(())
     }
 
     fn copy(&mut self, dst: Offset, src: Offset, size: Offset) -> Option<()> {
@@ -327,7 +414,7 @@ impl MemValue {
     const TAG_SET_WORD: u8 = 8;
     const TAG_GET_WORD: u8 = 9;
 
-    pub fn string(value: Block<u8>) -> Self {
+    pub fn string(value: Str) -> Self {
         Self(value.0.0, Self::TAG_STRING)
     }
 
