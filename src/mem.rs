@@ -572,10 +572,10 @@ pub fn stack_load<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Stack<'a, Me
     Stack::load(heap, addr)
 }
 
-pub fn parse<'a>(heap: &'a mut Heap<'a>, input: &str) -> Option<()> {
-    let parse = Stack::<MemValue>::alloc(heap, 100)?;
-    let base = Stack::<Word>::alloc(heap, 20)?;
-    let mut collector =
-        ParseCollector::new(heap, Stack::load(heap, parse)?, Stack::load(heap, base)?);
-    crate::parse::Parser::parse(input, &mut collector).ok()
-}
+// pub fn parse<'a>(heap: &'a mut Heap<'a>, input: &str) -> Option<()> {
+//     let parse = Stack::<MemValue>::alloc(heap, 100)?;
+//     let base = Stack::<Word>::alloc(heap, 20)?;
+//     let mut collector =
+//         ParseCollector::new(heap, Stack::load(heap, parse)?, Stack::load(heap, base)?);
+//     crate::parse::Parser::parse(input, &mut collector).ok()
+// }
