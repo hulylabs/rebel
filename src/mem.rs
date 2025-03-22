@@ -343,10 +343,17 @@ impl<'a> Memory<'a> {
         let src = (from_data_address_bytes + from_new_data_len_bytes) as usize;
         let dst = (to_data_address_bytes + to_new_data_len_bytes) as usize;
         let size = size_bytes as usize;
-        memory_bytes.copy_within(src..src + size, dst);
+        // memory_bytes.copy_within(src..src + size, dst);
 
-        from.set_len(from_new_data_len_bytes, self)?;
-        Some(())
+        if dst + size > memory_bytes.len() || src + size > memory_bytes.len() {
+            None
+        } else {
+            for i in 0..size {
+                memory_bytes[dst + i] = memory_bytes[src + i];
+            }
+            from.set_len(from_new_data_len_bytes, self)?;
+            Some(())
+        }
     }
 
     // pub fn init(memory: &'a mut [u8], sizes: [Offset; 4]) -> Self {
