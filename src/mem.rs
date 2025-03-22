@@ -1,7 +1,7 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
 use crate::parse::{Collector, WordKind};
-use std::{marker::PhantomData, ops::Div};
+use std::marker::PhantomData;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -15,63 +15,307 @@ pub enum MemoryError {
 }
 
 type Word = u32;
+type Offset = Word;
 
-fn write_word(data: &mut [u8], value: Word) -> Option<()> {
-    if data.len() < 4 {
-        None
-    } else {
-        data[0] = value as u8;
-        data[1] = (value >> 8) as u8;
-        data[2] = (value >> 16) as u8;
-        data[3] = (value >> 24) as u8;
+pub trait Item: Sized {
+    const SIZE: Offset;
+
+    fn load(data: &[u8]) -> Option<Self>;
+    fn store(self, data: &mut [u8]) -> Option<()>;
+}
+
+struct LenAddress(Offset);
+
+impl LenAddress {
+    fn drain(&self, size: Offset, memory: &mut Memory) -> Option<Offset> {
+        let len = self.get_len(memory)?;
+        let start = len.checked_sub(size)?;
+        self.set_len(start, memory)?;
+        Some(start)
+    }
+
+    fn get_len(&self, memory: &Memory) -> Option<Offset> {
+        let address = self.address();
+        memory
+            .get(address, 4)?
+            .try_into()
+            .ok()
+            .map(u32::from_le_bytes)
+    }
+
+    fn set_len(&self, len: Offset, memory: &mut Memory) -> Option<()> {
+        let address = self.0;
+        let len = len.to_le_bytes();
+        memory
+            .get_mut(address, 4)
+            .map(|slot| slot.copy_from_slice(&len))
+    }
+
+    fn address(&self) -> Offset {
+        self.0
+    }
+
+    fn data_address(&self) -> Offset {
+        self.0 + 4
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CapAddress(Offset);
+
+impl CapAddress {
+    // fn get_cap(&self, memory: &Memory) -> Option<usize> {
+    //     let address = self.address();
+    //     memory
+    //         .get(address, address + 4)?
+    //         .try_into()
+    //         .ok()
+    //         .map(u32::from_le_bytes)
+    //         .map(|x| x as usize)
+    // }
+
+    fn set_cap(&self, cap: Offset, memory: &mut Memory) -> Option<()> {
+        memory
+            .get_mut(self.address(), 4)
+            .map(|slot| slot.copy_from_slice(&u32::to_le_bytes(cap)))
+    }
+
+    fn reserve_slot(&self, size: Offset, memory: &mut Memory) -> Option<Offset> {
+        let address = self.address();
+        let header = memory.get_mut(address, 8)?;
+
+        let cap = u32::from_le_bytes(header[0..4].try_into().ok()?);
+        let len = u32::from_le_bytes(header[4..8].try_into().ok()?);
+
+        let new_len = len + size as Offset;
+        if new_len <= cap {
+            header[4..8].copy_from_slice(&new_len.to_le_bytes());
+            Some(self.data_address() + len)
+        } else {
+            None
+        }
+    }
+
+    fn reserve_len(&self, size: Offset, memory: &mut Memory) -> Option<LenAddress> {
+        self.reserve_slot(size + 4, memory)
+            .map(LenAddress)
+            .inspect(|x| {
+                x.set_len(size, memory).unwrap();
+            })
+    }
+
+    fn alloc_len(&self, data: &[u8], memory: &mut Memory) -> Option<LenAddress> {
+        let len = data.len() as Offset;
+        self.reserve_len(len, memory).inspect(|addr| {
+            memory
+                .get_mut(addr.data_address(), len)
+                .unwrap()
+                .copy_from_slice(data);
+        })
+    }
+
+    // fn alloc_cap(&self, size: Offset, memory: &mut Memory) -> Option<CapAddress> {
+    //     let cap = self.reserve_slot(size + 8, memory).map(CapAddress)?;
+    //     cap.set_cap(size, memory)?;
+    //     cap.len_address().set_len(0, memory)?;
+    //     Some(cap)
+    // }
+
+    fn len_address(&self) -> LenAddress {
+        LenAddress(self.0 + 4)
+    }
+
+    fn address(&self) -> Offset {
+        self.0
+    }
+
+    fn data_address(&self) -> Offset {
+        self.0 + 8
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Stack<I>(CapAddress, PhantomData<I>);
+
+impl<I> Stack<I>
+where
+    I: Item,
+{
+    pub fn new(addr: CapAddress) -> Self {
+        Self(addr, PhantomData)
+    }
+
+    pub fn len(&self, memory: &Memory) -> Option<Offset> {
+        self.0.len_address().get_len(memory)
+    }
+
+    pub fn peek(&self, memory: &Memory) -> Option<I> {
+        let len = self.0.len_address().get_len(memory)?;
+        let start = len.checked_sub(I::SIZE)?;
+        let data = self.0.data_address();
+        memory.get(data + start, I::SIZE).and_then(I::load)
+    }
+
+    pub fn push(&self, item: I, memory: &mut Memory) -> Option<()> {
+        self.0
+            .reserve_slot(I::SIZE, memory)
+            .and_then(|slot| item.store(memory.get_mut(slot, I::SIZE)?))
+    }
+
+    pub fn pop(&self, memory: &mut Memory) -> Option<I> {
+        self.0
+            .len_address()
+            .drain(I::SIZE, memory)
+            .and_then(|offset| memory.get(offset, I::SIZE))
+            .and_then(I::load)
+    }
+
+    fn drain(&self, to: CapAddress, items: Word, memory: &mut Memory) -> Option<Block<I>> {
+        memory
+            .cut_and_paste(to, self.0.len_address(), items * I::SIZE)
+            .map(Block::new)
+    }
+
+    fn drain_all(&self, to: CapAddress, memory: &mut Memory) -> Option<Block<I>> {
+        self.drain(to, self.len(memory)?, memory)
+    }
+}
+
+pub struct Block<I>(LenAddress, PhantomData<I>);
+
+impl<I> Block<I>
+where
+    I: Item,
+{
+    pub fn new(addr: LenAddress) -> Self {
+        Self(addr, PhantomData)
+    }
+
+    pub fn len(&self, memory: &Memory) -> Option<Word> {
+        self.0.get_len(memory).map(|x| x / I::SIZE)
+    }
+
+    pub fn get(&self, index: Word, memory: &Memory) -> Option<I> {
+        let len = self.len(memory)?;
+        let item_start = index * I::SIZE;
+        let item_end = (index + 1) * I::SIZE;
+        if item_end <= len {
+            let data = self.0.data_address();
+            memory.get(data + item_start, I::SIZE).and_then(I::load)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Arena(CapAddress);
+
+impl Arena {
+    pub fn new(addr: CapAddress) -> Self {
+        Self(addr)
+    }
+
+    pub fn alloc_stack<I: Item>(&self, items: Word, memory: &mut Memory) -> Option<Stack<I>> {
+        Some(Stack::new(self.0))
+    }
+
+    pub fn alloc_block<I: Item>(&self, memory: &mut Memory, data: &[u8]) -> Option<Block<I>> {
+        self.0.alloc_len(data, memory).map(Block::new)
+    }
+
+    pub fn alloc_string(&self, memory: &mut Memory, string: &str) -> Option<Block<u8>> {
+        self.alloc_block(memory, string.as_bytes())
+    }
+}
+
+pub struct Memory<'a> {
+    memory: &'a mut [u8],
+}
+
+impl<'a> Memory<'a> {
+    pub fn new(memory: &'a mut [u8]) -> Self {
+        Self { memory }
+    }
+
+    fn copy(&mut self, dst: Offset, src: Offset, size: Offset) -> Option<()> {
+        let size = size as usize;
+        let dst = dst as usize;
+        if dst + size > self.memory.len() {
+            return None;
+        }
+        let src = src as usize;
+        if src + size > self.memory.len() {
+            return None;
+        }
+        for i in 0..size {
+            self.memory[dst + i] = self.memory[src + i];
+        }
+        Some(())
+    }
+
+    fn cut_and_paste(
+        &mut self,
+        to: CapAddress,
+        from: LenAddress,
+        size: Offset,
+    ) -> Option<LenAddress> {
+        let src = from.drain(size, self)?;
+        let dst = to.reserve_len(size, self)?;
+        self.copy(dst.data_address(), src, size)?;
+        Some(dst)
+    }
+
+    fn get(&self, start: Offset, len: Offset) -> Option<&[u8]> {
+        let start = start as usize;
+        let end = start + len as usize;
+        self.memory.get(start..end)
+    }
+
+    fn get_mut(&mut self, start: Offset, len: Offset) -> Option<&mut [u8]> {
+        let start = start as usize;
+        let end = start + len as usize;
+        self.memory.get_mut(start..end)
+    }
+}
+
+//
+
+impl Item for u8 {
+    const SIZE: Offset = 1;
+
+    fn load(data: &[u8]) -> Option<Self> {
+        data.get(0).copied()
+    }
+
+    fn store(self, data: &mut [u8]) -> Option<()> {
+        data.get_mut(0).map(|slot| *slot = self)
+    }
+}
+
+impl Item for Word {
+    const SIZE: Offset = 4;
+
+    fn load(data: &[u8]) -> Option<Self> {
+        let bytes = data.try_into().ok()?;
+        Some(u32::from_le_bytes(bytes))
+    }
+
+    fn store(self, data: &mut [u8]) -> Option<()> {
+        let bytes = self.to_le_bytes();
+        data.copy_from_slice(&bytes);
         Some(())
     }
 }
 
-fn read_word(data: &[u8]) -> Option<Word> {
-    if data.len() < 4 {
-        None
-    } else {
-        let result = data[0] as u32
-            | (data[1] as u32) << 8
-            | (data[2] as u32) << 16
-            | (data[3] as u32) << 24;
-        Some(result)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Addr(Word);
-
-impl Addr {
-    pub fn as_usize(&self) -> usize {
-        self.0 as usize
-    }
-}
-
-#[derive(Debug)]
-pub struct Symbol(Addr);
+//
 
 type Tag = u8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MemValue(Word, Tag);
 
-#[derive(Debug)]
-pub enum VmValue {
-    None,
-    Int(i32),
-    Bool(bool),
-    Block(Addr),
-    Context(Addr),
-    Path(Addr),
-    String(Addr),
-    Word(Symbol),
-    SetWord(Symbol),
-    GetWord(Symbol),
-}
-
-impl VmValue {
+impl MemValue {
     const TAG_NONE: u8 = 0;
     const TAG_INT: u8 = 1;
     const TAG_BOOL: u8 = 2;
@@ -83,56 +327,25 @@ impl VmValue {
     const TAG_SET_WORD: u8 = 8;
     const TAG_GET_WORD: u8 = 9;
 
-    const fn to_mem_value(&self) -> MemValue {
-        match self {
-            VmValue::None => MemValue(0, VmValue::TAG_NONE),
-            VmValue::Int(value) => MemValue(*value as u32, VmValue::TAG_INT),
-            VmValue::Bool(value) => MemValue(if *value { 1 } else { 0 }, VmValue::TAG_BOOL),
-            VmValue::Block(addr) => MemValue(addr.0, VmValue::TAG_BLOCK),
-            VmValue::Context(addr) => MemValue(addr.0, VmValue::TAG_CONTEXT),
-            VmValue::Path(addr) => MemValue(addr.0, VmValue::TAG_PATH),
-            VmValue::String(addr) => MemValue(addr.0, VmValue::TAG_STRING),
-            VmValue::Word(symbol) => MemValue(symbol.0.0, VmValue::TAG_WORD),
-            VmValue::SetWord(symbol) => MemValue(symbol.0.0, VmValue::TAG_SET_WORD),
-            VmValue::GetWord(symbol) => MemValue(symbol.0.0, VmValue::TAG_GET_WORD),
-        }
+    pub fn string(value: Block<u8>) -> Self {
+        Self(value.0.0, Self::TAG_STRING)
     }
 
-    const fn try_from(mem: MemValue) -> Option<VmValue> {
-        let MemValue(addr, tag) = mem;
-        match tag {
-            VmValue::TAG_NONE => Some(VmValue::None),
-            VmValue::TAG_INT => Some(VmValue::Int(addr as i32)),
-            VmValue::TAG_BOOL => Some(VmValue::Bool(addr != 0)),
-            VmValue::TAG_BLOCK => Some(VmValue::Block(Addr(addr))),
-            VmValue::TAG_CONTEXT => Some(VmValue::Context(Addr(addr))),
-            VmValue::TAG_PATH => Some(VmValue::Path(Addr(addr))),
-            VmValue::TAG_STRING => Some(VmValue::String(Addr(addr))),
-            VmValue::TAG_WORD => Some(VmValue::Word(Symbol(Addr(addr)))),
-            VmValue::TAG_SET_WORD => Some(VmValue::SetWord(Symbol(Addr(addr)))),
-            VmValue::TAG_GET_WORD => Some(VmValue::GetWord(Symbol(Addr(addr)))),
-            _ => None,
-        }
+    pub fn int(value: i32) -> Self {
+        Self(value as Word, Self::TAG_INT)
     }
-}
 
-impl TryFrom<MemValue> for VmValue {
-    type Error = MemoryError;
-
-    fn try_from(mem: MemValue) -> Result<Self, Self::Error> {
-        Self::try_from(mem).ok_or(MemoryError::InvalidTag)
+    pub fn block(value: Block<MemValue>) -> Self {
+        Self(value.0.0, Self::TAG_BLOCK)
     }
-}
 
-pub trait Item: Sized {
-    const SIZE: usize;
-
-    fn load(data: &[u8]) -> Option<Self>;
-    fn store(self, data: &mut [u8]) -> Option<()>;
+    pub fn path(value: Block<MemValue>) -> Self {
+        Self(value.0.0, Self::TAG_PATH)
+    }
 }
 
 impl Item for MemValue {
-    const SIZE: usize = 8;
+    const SIZE: Offset = 8;
 
     fn load(data: &[u8]) -> Option<Self> {
         let addr = data.get(..4)?;
@@ -156,348 +369,38 @@ impl Item for MemValue {
     }
 }
 
-pub struct Slice<'a, I: Item>(&'a [u8], PhantomData<I>);
-
-impl<'a, I> Slice<'a, I>
-where
-    I: Item,
-{
-    pub fn len(&self) -> usize {
-        self.0.len() / I::SIZE
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn get(&self, index: usize) -> Option<I> {
-        let start = I::SIZE * index;
-        self.0.get(start..start + I::SIZE).and_then(I::load)
-    }
-}
-
-pub struct SliceMut<'a, I: Item>(&'a mut [u8], PhantomData<I>);
-
-impl<'a, I> SliceMut<'a, I>
-where
-    I: Item,
-{
-    pub fn len(&self) -> usize {
-        self.0.len() / I::SIZE
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn set(&mut self, index: usize, value: I) -> Option<()> {
-        let start = I::SIZE * index;
-        let slot = self.0.get_mut(start..start + I::SIZE)?;
-        value.store(slot)
-    }
-}
-
-pub trait Series {
-    type Item: Item;
-
-    /// Returns number of words needed to store the given number of items.
-    fn words_needed(items: usize) -> usize;
-
-    // fn split_mut(&mut self) -> Result<(&mut Word, &mut [Word]), MemoryError>;
-
-    /// Returns the number of items in the series.
-    fn len(&self) -> Option<usize>;
-
-    /// Returns `true` if the series is empty.
-    fn is_empty(&self) -> Option<bool>;
-
-    // /// Appends an item to the series.
-    // fn push(&mut self, item: Self::Item) -> Result<(), MemoryError> {
-    //     let (len, data) = self.split_mut()?;
-    //     let addr = *len as usize;
-    //     *len += Self::Item::SIZE as Word;
-    //     let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
-    //     Self::Item::store(&item, &mut data[addr..addr + Self::Item::SIZE])
-    // }
-}
-
-// pub struct Boxed<I>(Addr, PhantomData<I>);
-
-// impl<'a, I> Boxed<I>
-// where
-//     I: Item<Error = MemoryError>,
-// {
-//     fn unbox<T: AsRef<[Word]> + ?Sized>(self, memory: &'a T) -> Option<&'a [Word]> {
-//         let addr = self.0.as_usize();
-//         let memory = memory.as_ref();
-//         let cap = memory.get(addr).copied()? as usize;
-//         memory.get(addr + 1..addr + cap)
-//     }
-
-//     pub fn unbox_sliced<T: AsRef<[Word]> + ?Sized>(self, memory: &'a T) -> Option<Sliced<'a, I>> {
-//         let memory = self.unbox(memory)?;
-//         let (items, data) = memory.split_first()?;
-//         let bytes = unsafe { std::mem::transmute::<&[u32], &[u8]>(data) };
-//         let allocated = (*items as usize) * I::SIZE;
-//         bytes.get(..allocated).map(|data| Sliced(data, PhantomData))
-//     }
-// }
-
-impl Item for u8 {
-    const SIZE: usize = 1;
-
-    fn load(data: &[u8]) -> Option<Self> {
-        data.get(0).copied()
-    }
-
-    fn store(self, data: &mut [u8]) -> Option<()> {
-        data.get_mut(0).map(|slot| *slot = self)
-    }
-}
-
-pub struct Heap<'a>(&'a mut [Word]);
-
-impl<'a> Heap<'a> {
-    fn get_word(&self, addr: Addr) -> Option<Word> {
-        self.0.get(addr.as_usize() + 1).copied()
-    }
-
-    fn get(&self, addr: Addr, len: Word) -> Option<&[Word]> {
-        let addr = addr.as_usize() + 1;
-        self.0.get(addr..addr + len as usize)
-    }
-
-    fn get_mut(&mut self, addr: Addr, len: Word) -> Option<&mut [Word]> {
-        let addr = addr.as_usize() + 1;
-        self.0.get_mut(addr..addr + len as usize)
-    }
-
-    fn alloc_words(&mut self, words: usize) -> Option<(&mut [Word], Addr)> {
-        let (len, data) = self.0.split_first_mut()?;
-        let addr = *len as usize;
-        *len += words as Word;
-        data.get_mut(addr..addr + words)
-            .map(|data| (data, Addr(addr as Word)))
-    }
-
-    fn alloc_raw(&mut self, raw: &[u8]) -> Option<Addr> {
-        let bytes = raw.len();
-        let size_words = (bytes + 3) / 4 + 1;
-        let (sealed, addr) = self.alloc_words(size_words)?;
-
-        let (len, data) = sealed.split_first_mut()?;
-        *len = bytes as Word;
-        let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
-
-        for (src, dst) in raw.iter().zip(data.iter_mut()) {
-            *dst = *src;
-        }
-
-        Some(addr)
-    }
-
-    pub fn alloc_string(&mut self, string: &str) -> Option<Addr> {
-        self.alloc_raw(string.as_bytes())
-    }
-
-    pub fn alloc_sealed<I: Item>(&mut self, slice: Slice<I>) -> Option<Addr> {
-        self.alloc_raw(slice.0)
-    }
-
-    pub fn load_sealed<I: Item>(&self, addr: Addr) -> Option<Sealed<I>> {
-        let len = self.get_word(addr)?;
-        let allocated = (len + 3) / 4 + 1;
-        let data = self.get(addr, allocated)?;
-        Some(Sealed(data, PhantomData))
-    }
-
-    fn drain<I: Item>(&mut self, from: SealedMut<I>, offset: Word) -> Option<Addr> {
-        let (len, data) = from.0.split_first_mut()?;
-        let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
-        let end = *len as usize;
-        *len = offset;
-        let offset = offset as usize;
-        let slice = data
-            .get(offset..end)
-            .map(|data| Slice::<I>(data, PhantomData))?;
-        self.alloc_sealed(slice)
-    }
-}
-
-pub struct Sealed<'a, I>(&'a [Word], PhantomData<I>);
-
-impl<'a, I> Sealed<'a, I>
-where
-    I: Item,
-{
-    // pub fn alloc(heap: &'a mut Heap<'a>, slice: Slice<'a, I>) -> Option<Addr> {
-    // let bytes = slice.0.len();
-    // let size_words = (bytes + 3) / 4 + 1;
-    // let (sealed, addr) = heap.alloc_words(size_words)?;
-
-    // let (len, data) = sealed.split_first_mut()?;
-    // *len = bytes as Word;
-    // let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
-
-    // for (src, dst) in slice.0.iter().zip(data.iter_mut()) {
-    //     *dst = *src;
-    // }
-
-    // Some(addr)
-    //     heap.alloc_raw(slice.0)
-    // }
-
-    // pub fn load(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Self> {
-    //     let len = heap.get_word(addr)?;
-    //     let allocated = (len + 3) / 4 + 1;
-    //     let data = heap.get_mut(addr, allocated)?;
-    //     Some(Sealed(data, PhantomData))
-    // }
-
-    pub fn len(&self) -> Option<usize> {
-        self.0.first().map(|len| *len as usize)
-    }
-
-    pub fn is_empty(&self) -> Option<bool> {
-        self.len().map(|len| len == 0)
-    }
-
-    pub fn items(self) -> Option<Slice<'a, I>> {
-        let (len, data) = self.0.split_first()?;
-        let len = *len as usize;
-        let data = unsafe { std::mem::transmute::<&[Word], &[u8]>(data) };
-        let data = data.get(..len)?;
-        Some(Slice(data, PhantomData))
-    }
-}
-
-pub struct SealedMut<'a, I>(&'a mut [Word], PhantomData<I>);
-
-impl<'a, I> SealedMut<'a, I>
-where
-    I: Item,
-{
-    fn push(&mut self, item: I) -> Option<()> {
-        let (len, data) = self.0.split_first_mut()?;
-        let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
-        let addr = *len as usize;
-        *len += I::SIZE as Word;
-        let slot = data.get_mut(addr..addr + I::SIZE)?;
-        item.store(slot)
-    }
-
-    fn pop(&mut self) -> Option<I> {
-        let (len, data) = self.0.split_first_mut()?;
-        let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
-        let addr = len.checked_sub(I::SIZE as Word)?;
-        *len = addr;
-        let addr = addr as usize;
-        data.get(addr..addr + I::SIZE).and_then(I::load)
-    }
-}
-
-//
-
-pub struct Stack<'a, I: Item>(&'a mut [Word], PhantomData<I>);
-
-impl<'a, I> Stack<'a, I>
-where
-    I: Item,
-{
-    pub fn alloc(heap: &'a mut Heap<'a>, items: usize) -> Option<Addr> {
-        let bytes = items * I::SIZE;
-        let size_words = (bytes + 3) / 4 + 2;
-        let (stack, addr) = heap.alloc_words(size_words)?;
-        if stack.len() < 2 {
-            None
-        } else {
-            stack[0] = size_words as Word;
-            stack[1] = 0;
-            Some(addr)
-        }
-    }
-
-    pub fn load(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Self> {
-        let cap = heap.get_word(addr)?;
-        let data = heap.get_mut(addr, cap)?;
-        Some(Stack(data, PhantomData))
-    }
-
-    pub fn len(&self) -> Option<Word> {
-        self.0.get(1).map(|len| len.div(I::SIZE as Word))
-    }
-
-    fn get_sealed_mut(&mut self) -> Option<SealedMut<I>> {
-        let (_, sealed) = self.0.split_first_mut()?;
-        Some(SealedMut(sealed, PhantomData))
-    }
-
-    pub fn push(&mut self, item: I) -> Option<()> {
-        self.get_sealed_mut()?.push(item)
-    }
-
-    pub fn pop(&mut self) -> Option<I> {
-        self.get_sealed_mut()?.pop()
-    }
-}
-
-//
-
-pub struct Memory<'a, T> {
-    memory: &'a mut T,
-}
-
-impl<'a, T> Memory<'a, T>
-where
-    T: AsMut<[Word]>,
-{
-    pub fn new(memory: &'a mut T) -> Self {
-        // let (parser, rest) = memory.as_mut().split_at_mut_checked(1000)?;
-
-        // Some(Self {
-        //     heap: Heap(rest),
-        //     parser: Stack(parser, PhantomData),
-        // })
-        Self { memory }
-    }
-
-    // fn parse(&mut self, input: &str) -> Option<()> {}
-}
-
-//
-
-impl Item for Word {
-    const SIZE: usize = 4;
-
-    fn load(data: &[u8]) -> Option<Self> {
-        read_word(data)
-    }
-
-    fn store(self, data: &mut [u8]) -> Option<()> {
-        write_word(data, self)
-    }
-}
-
 // P A R S E  C O L L E C T O R
 
 struct ParseCollector<'a> {
-    heap: &'a mut Heap<'a>,
-    parse: Stack<'a, MemValue>,
-    base: Stack<'a, Word>,
+    memory: &'a mut Memory<'a>,
+    heap: Arena,
+    parse: Stack<MemValue>,
+    base: Stack<Word>,
 }
 
 impl<'a> ParseCollector<'a> {
-    fn new(heap: &'a mut Heap<'a>, parse: Stack<'a, MemValue>, base: Stack<'a, Word>) -> Self {
-        Self { heap, parse, base }
+    fn new(
+        memory: &'a mut Memory<'a>,
+        heap: Arena,
+        parse: Stack<MemValue>,
+        base: Stack<Word>,
+    ) -> Self {
+        Self {
+            memory,
+            heap,
+            parse,
+            base,
+        }
     }
 
     fn begin(&mut self) -> Option<()> {
-        self.parse.len().and_then(|len| self.base.push(len))
+        let len = self.parse.len(self.memory)? as Word;
+        self.base.push(len, self.memory)
     }
 
-    fn end(&mut self) -> Option<Addr> {
-        let base = self.base.pop()?;
-        self.heap.drain(self.parse.get_sealed_mut()?, base)
+    fn end(&mut self) -> Option<Block<MemValue>> {
+        self.parse
+            .drain(self.heap.0, self.base.pop(self.memory)?, self.memory)
     }
 }
 
@@ -505,8 +408,11 @@ impl Collector for ParseCollector<'_> {
     type Error = MemoryError;
 
     fn string(&mut self, string: &str) -> Option<()> {
-        let addr = self.heap.alloc_string(string)?;
-        self.parse.push(MemValue(addr.0, VmValue::TAG_STRING))
+        let string = self
+            .heap
+            .alloc_string(self.memory, string)
+            .map(MemValue::string)?;
+        self.parse.push(string, self.memory)
     }
 
     fn word(&mut self, kind: WordKind, word: &str) -> Option<()> {
@@ -522,8 +428,7 @@ impl Collector for ParseCollector<'_> {
     }
 
     fn integer(&mut self, value: i32) -> Option<()> {
-        let mem = MemValue(value as Word, VmValue::TAG_INT);
-        self.parse.push(mem)
+        self.parse.push(MemValue::int(value), self.memory)
     }
 
     fn begin_block(&mut self) -> Option<()> {
@@ -531,8 +436,8 @@ impl Collector for ParseCollector<'_> {
     }
 
     fn end_block(&mut self) -> Option<()> {
-        let block = self.end()?;
-        self.parse.push(MemValue(block.0, VmValue::TAG_BLOCK))
+        let block = self.end().map(MemValue::block)?;
+        self.parse.push(block, self.memory)
     }
 
     fn begin_path(&mut self) -> Option<()> {
@@ -540,42 +445,39 @@ impl Collector for ParseCollector<'_> {
     }
 
     fn end_path(&mut self) -> Option<()> {
-        let block = self.end()?;
-        self.parse.push(MemValue(block.0, VmValue::TAG_PATH))
+        let block = self.end().map(MemValue::path)?;
+        self.parse.push(block, self.memory)
     }
 }
 
-// Following function used only to look at generated assembly code and not used in the actual program.
+//
 
-pub fn alloc_sealed<'a>(heap: &'a mut Heap<'a>, slice: Slice<'a, MemValue>) -> Option<Addr> {
-    // Sealed::alloc(heap, slice)
-    heap.alloc_sealed(slice)
+pub fn push(memory: &mut Memory, stack: &mut Stack<u8>, item: u8) -> Option<()> {
+    stack.push(item, memory)
 }
 
-pub fn get_sealed_item<'a>(heap: &'a Heap<'a>, addr: Addr, pos: usize) -> Option<MemValue> {
-    heap.load_sealed(addr).and_then(Sealed::items)?.get(pos)
+pub fn peek(memory: &Memory, stack: &Stack<u8>) -> Option<u8> {
+    stack.peek(memory)
 }
 
-pub fn push_item<'a>(heap: &'a mut Heap<'a>, addr: Addr, item: MemValue) -> Option<()> {
-    Stack::load(heap, addr)?.push(item)
+pub fn pop(memory: &mut Memory, stack: &mut Stack<u8>) -> Option<u8> {
+    stack.pop(memory)
 }
 
-pub fn pop_item<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<MemValue> {
-    Stack::load(heap, addr)?.pop()
+pub fn get(memory: &Memory, block: &Block<u8>, index: Offset) -> Option<u8> {
+    block.get(index, memory)
 }
 
-pub fn sealed_load<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Sealed<'a, MemValue>> {
-    heap.load_sealed(addr)
-}
+pub fn parse_block<'a>(
+    memory: &'a mut Memory<'a>,
+    heap: Arena,
+    input: &str,
+) -> Option<Stack<MemValue>> {
+    let parse = heap.alloc_stack::<MemValue>(100, memory)?;
+    let base = heap.alloc_stack::<Word>(20, memory)?;
 
-pub fn stack_load<'a>(heap: &'a mut Heap<'a>, addr: Addr) -> Option<Stack<'a, MemValue>> {
-    Stack::load(heap, addr)
-}
+    let mut collector = ParseCollector::new(memory, heap, parse, base);
+    crate::parse::Parser::parse(input, &mut collector).ok()?;
 
-// pub fn parse<'a>(heap: &'a mut Heap<'a>, input: &str) -> Option<()> {
-//     let parse = Stack::<MemValue>::alloc(heap, 100)?;
-//     let base = Stack::<Word>::alloc(heap, 20)?;
-//     let mut collector =
-//         ParseCollector::new(heap, Stack::load(heap, parse)?, Stack::load(heap, base)?);
-//     crate::parse::Parser::parse(input, &mut collector).ok()
-// }
+    Some(collector.parse)
+}
