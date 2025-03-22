@@ -434,9 +434,13 @@ impl Item for Word {
     }
 
     fn store(self, data: &mut [u8]) -> Option<()> {
-        let bytes = self.to_le_bytes();
-        data.copy_from_slice(&bytes);
-        Some(())
+        if data.len() == 4 {
+            let bytes = self.to_le_bytes();
+            data.copy_from_slice(&bytes);
+            Some(())
+        } else {
+            None
+        }
     }
 }
 
