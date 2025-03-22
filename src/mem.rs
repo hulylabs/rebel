@@ -252,6 +252,7 @@ impl Str {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Arena(CapAddress);
 
 impl Arena {
@@ -321,12 +322,54 @@ pub struct Memory<'a> {
 }
 
 impl<'a> Memory<'a> {
+    const LAYOUT_OFFSET: Offset = 1;
+    const LAYOUT_REGIONS: Offset = 4;
+
     const LAYOUT_SYMBOL_TABLE: Offset = 0;
     const LAYOUT_PARSE_STACK: Offset = 1;
     const LAYOUT_PARSE_BASE: Offset = 2;
     const LAYOUT_HEAP: Offset = 3;
 
-    const LAYOUT_REGIONS: Offset = 4;
+    pub fn init(memory: &'a mut [u32], sizes: [Offset; 4]) -> Option<Self> {
+        let mut memory = Self { memory };
+
+        memory.set_word(0, 0x0BAD_F00D)?;
+        memory.make_block(Self::LAYOUT_OFFSET, Self::LAYOUT_REGIONS * 4)?;
+
+        debug_assert!(8 + Self::LAYOUT_REGIONS * 4 < 64);
+        let mut addr: u32 = 64;
+
+        for (i, size) in sizes.iter().enumerate() {
+            let cap = size.checked_sub(8)?;
+            let cap_address = memory.make_cap(addr, cap)?;
+            memory.set_word(Self::LAYOUT_REGIONS + 1 + i as Offset, cap_address.0)?;
+            addr += size;
+        }
+
+        Some(memory)
+    }
+
+    fn get_region(&self, region: Offset) -> Option<CapAddress> {
+        let address = self.get_word(Self::LAYOUT_REGIONS + 1 + region)?;
+        Some(CapAddress(address))
+    }
+
+    pub fn get_symbol_table(&self) -> Option<SymbolTable> {
+        self.get_region(Self::LAYOUT_SYMBOL_TABLE).map(SymbolTable)
+    }
+
+    fn make_block(&mut self, address: Offset, len: Word) -> Option<LenAddress> {
+        let len_address = LenAddress(address);
+        len_address.set_len(len, self)?;
+        Some(len_address)
+    }
+
+    fn make_cap(&mut self, address: Offset, cap: Word) -> Option<CapAddress> {
+        self.set_word(address, cap)?;
+        let cap_address = CapAddress(address);
+        cap_address.len_address().set_len(0, self)?;
+        Some(cap_address)
+    }
 
     // move bytes from one block to another. we assume target block has slot allocated already -- we replace the data
     fn move_items(&mut self, to: LenAddress, from: LenAddress, size_bytes: Word) -> Option<()> {
@@ -355,45 +398,6 @@ impl<'a> Memory<'a> {
             Some(())
         }
     }
-
-    // pub fn init(memory: &'a mut [u8], sizes: [Offset; 4]) -> Self {
-    //     let mut addr: u32 = 0;
-    //     for &size in sizes.iter() {
-    //         let cap = CapAddress(addr);
-    //         cap.set_cap(size, &mut Self { memory });
-    //         addr += size;
-    //     }
-
-    //     Self { memory }
-    // }
-
-    // fn copy(&mut self, dst: Offset, src: Offset, size: Offset) -> Option<()> {
-    //     let size = size as usize;
-    //     let dst = dst as usize;
-    //     if dst + size > self.memory.len() {
-    //         return None;
-    //     }
-    //     let src = src as usize;
-    //     if src + size > self.memory.len() {
-    //         return None;
-    //     }
-    //     for i in 0..size {
-    //         self.memory[dst + i] = self.memory[src + i];
-    //     }
-    //     Some(())
-    // }
-
-    // fn cut_and_paste(
-    //     &mut self,
-    //     to: CapAddress,
-    //     from: LenAddress,
-    //     size: Offset,
-    // ) -> Option<LenAddress> {
-    //     let src = from.drain(size, self)?;
-    //     let dst = to.reserve_len(size, self)?;
-    //     self.copy(dst.data_address(), src, size)?;
-    //     Some(dst)
-    // }
 
     fn get_word(&self, address: Offset) -> Option<Word> {
         self.memory.get(address as usize).copied()
@@ -548,6 +552,12 @@ impl<'a> ParseCollector<'a> {
             self.memory,
         )
     }
+
+    fn get_symbol(&mut self, symbol: &str) -> Option<LenAddress> {
+        self.memory
+            .get_symbol_table()
+            .and_then(|table| table.get_or_insert_symbol(symbol, self.heap.clone(), self.memory))
+    }
 }
 
 impl Collector for ParseCollector<'_> {
@@ -562,15 +572,13 @@ impl Collector for ParseCollector<'_> {
     }
 
     fn word(&mut self, kind: WordKind, word: &str) -> Option<()> {
-        Some(())
-        // self.module.get_or_insert_symbol(word).and_then(|id| {
-        //     let value = match kind {
-        //         WordKind::Word => VmValue::Word(id),
-        //         WordKind::SetWord => VmValue::SetWord(id),
-        //         WordKind::GetWord => VmValue::GetWord(id),
-        //     };
-        //     self.parse.push(value.vm_repr())
-        // })
+        let tag = match kind {
+            WordKind::Word => MemValue::TAG_WORD,
+            WordKind::SetWord => MemValue::TAG_SET_WORD,
+            WordKind::GetWord => MemValue::TAG_GET_WORD,
+        };
+        let value = MemValue(self.get_symbol(word)?.0, tag);
+        self.parse.push(value, self.memory)
     }
 
     fn integer(&mut self, value: i32) -> Option<()> {
