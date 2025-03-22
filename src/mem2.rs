@@ -1,7 +1,7 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
 use crate::parse::{Collector, WordKind};
-use std::marker::PhantomData;
+use std::{marker::PhantomData, mem};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -27,6 +27,13 @@ pub trait Item: Sized {
 struct LenAddress(Offset);
 
 impl LenAddress {
+    fn drain(&self, size: Offset, memory: &mut Memory) -> Option<Offset> {
+        let len = self.get_len(memory)?;
+        let start = len.checked_sub(size)?;
+        self.set_len(start, memory)?;
+        Some(start)
+    }
+
     fn get_len(&self, memory: &Memory) -> Option<Offset> {
         let address = self.address();
         memory
@@ -36,7 +43,7 @@ impl LenAddress {
             .map(u32::from_le_bytes)
     }
 
-    fn set_len(&self, memory: &mut Memory, len: Offset) -> Option<()> {
+    fn set_len(&self, len: Offset, memory: &mut Memory) -> Option<()> {
         let address = self.0;
         let len = len.to_le_bytes();
         memory
@@ -57,24 +64,61 @@ impl LenAddress {
 struct CapAddress(Offset);
 
 impl CapAddress {
-    fn get_cap(&self, memory: &Memory) -> Option<usize> {
-        let address = self.address();
+    // fn get_cap(&self, memory: &Memory) -> Option<usize> {
+    //     let address = self.address();
+    //     memory
+    //         .get(address, address + 4)?
+    //         .try_into()
+    //         .ok()
+    //         .map(u32::from_le_bytes)
+    //         .map(|x| x as usize)
+    // }
+
+    fn set_cap(&self, cap: Offset, memory: &mut Memory) -> Option<()> {
         memory
-            .get(address, address + 4)?
-            .try_into()
-            .ok()
-            .map(u32::from_le_bytes)
-            .map(|x| x as usize)
+            .get_mut(self.address(), 4)
+            .map(|slot| slot.copy_from_slice(&u32::to_le_bytes(cap)))
     }
 
-    fn set_cap(&self, memory: &mut Memory, len: usize) -> Option<()> {
-        let address = self.0 as usize;
-        let len = len as u32;
-        let len = len.to_le_bytes();
-        memory
-            .memory
-            .get_mut(address..address + 4)
-            .map(|slot| slot.copy_from_slice(&len))
+    fn reserve_slot(&self, size: Offset, memory: &mut Memory) -> Option<Offset> {
+        let address = self.address();
+        let header = memory.get_mut(address, 8)?;
+
+        let cap = u32::from_le_bytes(header[0..4].try_into().ok()?);
+        let len = u32::from_le_bytes(header[4..8].try_into().ok()?);
+
+        let new_len = len + size as Offset;
+        if new_len <= cap {
+            header[4..8].copy_from_slice(&new_len.to_le_bytes());
+            Some(self.data_address() + len)
+        } else {
+            None
+        }
+    }
+
+    fn reserve_len(&self, size: Offset, memory: &mut Memory) -> Option<LenAddress> {
+        self.reserve_slot(size + 4, memory)
+            .map(LenAddress)
+            .inspect(|x| {
+                x.set_len(size, memory).unwrap();
+            })
+    }
+
+    fn alloc_len(&self, data: &[u8], memory: &mut Memory) -> Option<LenAddress> {
+        let len = data.len() as Offset;
+        self.reserve_len(len, memory).inspect(|addr| {
+            memory
+                .get_mut(addr.data_address(), len)
+                .unwrap()
+                .copy_from_slice(data);
+        })
+    }
+
+    fn alloc_cap(&self, size: Offset, memory: &mut Memory) -> Option<CapAddress> {
+        let cap = self.reserve_slot(size + 8, memory).map(CapAddress)?;
+        cap.set_cap(size, memory)?;
+        cap.len_address().set_len(0, memory)?;
+        Some(cap)
     }
 
     fn len_address(&self) -> LenAddress {
@@ -155,6 +199,7 @@ impl CapAddress {
 //     }
 // }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Stack<I>(CapAddress, PhantomData<I>);
 
 impl<I> Stack<I>
@@ -177,22 +222,27 @@ where
     }
 
     pub fn push(&self, item: I, memory: &mut Memory) -> Option<()> {
-        memory
-            .alloc(self.0, I::SIZE)
-            .and_then(|slot| item.store(slot.0))
+        self.0
+            .reserve_slot(I::SIZE, memory)
+            .and_then(|slot| item.store(memory.get_mut(slot, I::SIZE)?))
     }
 
     pub fn pop(&self, memory: &mut Memory) -> Option<I> {
-        memory
-            .drain(self.0.len_address(), I::SIZE)
-            .and_then(|start| memory.get(start, I::SIZE))
+        self.0
+            .len_address()
+            .drain(I::SIZE, memory)
+            .and_then(|offset| memory.get(offset, I::SIZE))
             .and_then(I::load)
     }
 
-    fn drain(&self, dst: CapAddress, items: Word, memory: &mut Memory) -> Option<Block<I>> {
+    fn drain(&self, to: CapAddress, items: Word, memory: &mut Memory) -> Option<Block<I>> {
         memory
-            .cut_and_paste(dst, self.0.len_address(), I::SIZE * items)
+            .cut_and_paste(to, self.0.len_address(), items * I::SIZE)
             .map(Block::new)
+    }
+
+    pub fn drain_all(&self, to: CapAddress, memory: &mut Memory) -> Option<Block<I>> {
+        self.drain(to, self.len(memory)?, memory)
     }
 }
 
@@ -231,11 +281,15 @@ impl Arena {
         Self(addr)
     }
 
-    pub fn alloc_block<I: Item>(self, memory: &mut Memory, data: &[u8]) -> Option<Block<I>> {
-        memory.alloc_len(self.0, data).map(Block::new)
+    pub fn alloc_stack<I: Item>(&self, items: Word, memory: &mut Memory) -> Option<Stack<I>> {
+        Some(Stack::new(self.0))
     }
 
-    pub fn alloc_string(self, memory: &mut Memory, string: &str) -> Option<Block<u8>> {
+    pub fn alloc_block<I: Item>(&self, memory: &mut Memory, data: &[u8]) -> Option<Block<I>> {
+        self.0.alloc_len(data, memory).map(Block::new)
+    }
+
+    pub fn alloc_string(&self, memory: &mut Memory, string: &str) -> Option<Block<u8>> {
         self.alloc_block(memory, string.as_bytes())
     }
 }
@@ -247,37 +301,6 @@ pub struct Memory<'a> {
 impl<'a> Memory<'a> {
     pub fn new(memory: &'a mut [u8]) -> Self {
         Self { memory }
-    }
-
-    fn alloc(&mut self, object: CapAddress, size: Offset) -> Option<(&mut [u8], Offset)> {
-        let address = object.address();
-        let header = self.get_mut(address, 8)?;
-
-        let cap = u32::from_le_bytes(header[0..4].try_into().ok()?);
-        let len = u32::from_le_bytes(header[4..8].try_into().ok()?);
-
-        let new_len = len + size as Offset;
-        if new_len <= cap {
-            header[4..8].copy_from_slice(&new_len.to_le_bytes());
-            let start = object.data_address() + len;
-            self.get_mut(start, size).map(|data| (data, start))
-        } else {
-            None
-        }
-    }
-
-    fn alloc_len_empty(&mut self, object: CapAddress, size: Offset) -> Option<LenAddress> {
-        let (allocated, addr) = self.alloc(object, size + 4)?;
-        let len = allocated.get_mut(0..4)?;
-        len.copy_from_slice(&size.to_le_bytes());
-        Some(LenAddress(addr))
-    }
-
-    fn alloc_len(&mut self, object: CapAddress, data: &[u8]) -> Option<LenAddress> {
-        let addr = self.alloc_len_empty(object, data.len() as Offset)?;
-        self.get_mut(addr.data_address(), data.len() as Offset)?
-            .copy_from_slice(data);
-        Some(addr)
     }
 
     fn copy(&mut self, dst: Offset, src: Offset, size: Offset) -> Option<()> {
@@ -296,23 +319,16 @@ impl<'a> Memory<'a> {
         Some(())
     }
 
-    fn drain(&mut self, len_address: LenAddress, size: Offset) -> Option<Offset> {
-        let len = len_address.get_len(self)?;
-        let start = len.checked_sub(size)?;
-        len_address.set_len(self, start)?;
-        Some(start)
-    }
-
     fn cut_and_paste(
         &mut self,
         to: CapAddress,
-        src: LenAddress,
+        from: LenAddress,
         size: Offset,
     ) -> Option<LenAddress> {
-        let from = self.drain(src, size)?;
-        let addr = self.alloc_len_empty(to, size)?;
-        self.copy(addr.data_address(), from, size)?;
-        Some(addr)
+        let src = from.drain(size, self)?;
+        let dst = to.reserve_len(size, self)?;
+        self.copy(dst.data_address(), src, size)?;
+        Some(dst)
     }
 
     fn get(&self, start: Offset, len: Offset) -> Option<&[u8]> {
@@ -517,11 +533,12 @@ pub fn get(memory: &Memory, block: &Block<u8>, index: Offset) -> Option<u8> {
     block.get(index, memory)
 }
 
-// pub fn parse<'a>(memory: &mut Memory, heap: Arena, input: &str) -> Option<Block<MemValue>> {
-//     let parse =
-//     let parse = Stack::<MemValue>::alloc(heap, 100)?;
-//     let base = Stack::<Word>::alloc(heap, 20)?;
-//     let mut collector =
-//         ParseCollector::new(heap, Stack::load(heap, parse)?, Stack::load(heap, base)?);
-//     crate::parse::Parser::parse(input, &mut collector).ok()
-// }
+pub fn parse<'a>(memory: &'a mut Memory<'a>, heap: Arena, input: &str) -> Option<Block<MemValue>> {
+    let parse = heap.alloc_stack::<MemValue>(100, memory)?;
+    let base = heap.alloc_stack::<Word>(20, memory)?;
+
+    let mut collector = ParseCollector::new(memory, heap, parse, base);
+    crate::parse::Parser::parse(input, &mut collector).ok()?;
+
+    parse.drain_all(heap.0, memory)
+}
