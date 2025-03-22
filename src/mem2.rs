@@ -533,12 +533,16 @@ pub fn get(memory: &Memory, block: &Block<u8>, index: Offset) -> Option<u8> {
     block.get(index, memory)
 }
 
-pub fn parse<'a>(memory: &'a mut Memory<'a>, heap: Arena, input: &str) -> Option<Block<MemValue>> {
+pub fn parse_block<'a>(
+    memory: &'a mut Memory<'a>,
+    heap: Arena,
+    input: &str,
+) -> Option<Stack<MemValue>> {
     let parse = heap.alloc_stack::<MemValue>(100, memory)?;
     let base = heap.alloc_stack::<Word>(20, memory)?;
 
     let mut collector = ParseCollector::new(memory, heap, parse, base);
     crate::parse::Parser::parse(input, &mut collector).ok()?;
 
-    parse.drain_all(heap.0, memory)
+    Some(collector.parse)
 }
