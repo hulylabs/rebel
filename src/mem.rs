@@ -71,7 +71,7 @@ impl LenAddress {
         let words = (len + 3) / 4;
         let data = memory.get_mut(self.data_address(), words)?;
         let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
-        Some(&mut data[..len as usize])
+        data.get_mut(..len as usize)
     }
 }
 
@@ -121,17 +121,22 @@ impl CapAddress {
 
     fn reserve_block(&self, size_bytes: Word, memory: &mut Memory) -> Option<LenAddress> {
         let aligned_len = (size_bytes + 3) & !3;
-        self.alloc_slot(4 + aligned_len, memory).map(|slot| {
-            slot[0..4].copy_from_slice(&u32::to_le_bytes(size_bytes));
-            LenAddress(self.0 + 1)
-        })
+        let slot = self.alloc_slot(4 + aligned_len, memory)?;
+        slot.get_mut(..4)?
+            .copy_from_slice(&u32::to_le_bytes(size_bytes));
+        Some(LenAddress(self.0 + 1))
     }
 
     fn alloc_block(&self, data: &[u8], memory: &mut Memory) -> Option<LenAddress> {
         let data_len = data.len() as Offset;
         let block = self.reserve_block(data_len, memory)?;
-        block.get_data_mut(memory)?.copy_from_slice(data);
-        Some(block)
+        let dst = block.get_data_mut(memory)?;
+        if dst.len() == data.len() {
+            dst.copy_from_slice(data);
+            Some(block)
+        } else {
+            None
+        }
     }
 
     // fn alloc_cap(&self, size_bytes: Offset, memory: &mut Memory) -> Option<CapAddress> {
