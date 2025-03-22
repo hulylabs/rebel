@@ -2,81 +2,39 @@
 
 ## Current Focus
 
-The project is currently in the early development phase with focus on building the core infrastructure:
+We are currently implementing the core memory management system for the Rebel interpreter. This involves:
 
-1. **Parser Implementation**: A functional parser for REBOL-like syntax is implemented in `parse.rs` with the ability to parse strings, words, integers, blocks, and paths.
+1. Implementing a low-level memory model with efficient operations
+2. Making the core memory structures accessible for testing
+3. Adding documentation to critical parts of the API
 
-2. **Value System**: The high-level value representation is implemented in `value.rs`, providing a type-safe way to work with Rebel values within Rust code.
+## Recent Work
 
-3. **Memory System**: The low-level memory management system is being developed in `mem.rs`, with support for tagged values, efficient memory allocation, and stack-based collection.
+- Made various internal methods in the memory management system public to support testing
+- Created new unit tests for memory address operations
+- Fixed visibility issues with memory operations
 
-4. **Collector Bridge**: The bridge between parsing and representation using the Collector pattern is established and working for both high-level values and low-level memory representation.
+## Current Issue
 
-## Recent Changes
+We're seeing test failures in both our original memory tests and our new memory address tests. The issues appear to be related to:
 
-Based on the code examination, recent development appears to have focused on:
+1. Stack operations not behaving as expected
+2. String storage operations failing
+3. Symbol table operations failing
+4. Block operations failing
 
-1. Implementation of the core parser with support for REBOL-like syntax.
-2. Development of two collector implementations:
-   - `ValueCollector` for building in-memory representations
-   - `ParseCollector` for VM-oriented memory representations
-3. Implementation of memory management primitives like `Heap`, `Stack`, and value slices.
-4. Unit tests for parser and value system behavior.
+We need to investigate if these are due to our recent API changes or underlying problems with the memory system implementation.
 
 ## Next Steps
 
-The following areas are likely the immediate next priorities:
+1. Investigate and fix the failing memory tests
+2. Complete comprehensive documentation on the memory system
+3. Ensure all critical operations have proper tests
+4. Refine the API for clarity and usability
 
-1. **Virtual Machine Implementation**:
-   - Develop an execution engine that can interpret the parsed values
-   - Implement evaluation semantics for blocks, paths, and words
-   - Add support for function definition and invocation
+## Design Considerations
 
-2. **Expanding Value System**:
-   - Add additional value types needed for the VM (functions, native functions, etc.)
-   - Implement more operations on values (comparison, arithmetic, etc.)
-   - Complete serialization and deserialization of values
-
-3. **Memory Management Enhancements**:
-   - Implement garbage collection for the VM
-   - Optimize memory usage for long-running processes
-   - Add persistent storage for process state
-
-4. **Process Abstraction**:
-   - Implement the `process` concept mentioned in the project brief
-   - Add support for interprocess communication
-   - Develop persistence/recovery mechanisms for processes
-
-5. **Standard Library**:
-   - Implement core functions for file I/O, networking, etc.
-   - Add shell-like functions for system interaction
-   - Develop foundation for configuration management capabilities
-
-## Active Decisions and Considerations
-
-Several key decisions and considerations appear to be active in the current development:
-
-1. **Memory Model Design**:
-   - How to efficiently represent values in memory
-   - Balancing performance with memory usage
-   - Supporting both the high-level Rust API and low-level VM needs
-
-2. **Execution Strategy**:
-   - Whether to use a bytecode VM or direct interpretation
-   - How to implement context/environment management
-   - Approach to function calling and return value handling
-
-3. **Process Implementation**:
-   - Defining the semantics of processes and how they differ from functions
-   - Mechanisms for persistence and recovery
-   - Approach to interprocess communication
-
-4. **Extension Points**:
-   - How to allow future extensions to the language
-   - Integration with host system capabilities
-   - FFI (Foreign Function Interface) design
-
-5. **AI Integration**:
-   - Specific language features to make the language more suitable for AI agents
-   - How to make the syntax and semantics conducive to AI-generated code
-   - Tools and interfaces for AI interaction with Rebel programs
+- Memory management needs to be particularly efficient to support the interpreter's operations
+- The system must handle different types of values: strings, integers, blocks, etc.
+- We're using a tagged value representation (MemValue) to handle the different types
+- Memory addresses (LenAddress, CapAddress) provide abstraction over raw offsets

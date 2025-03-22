@@ -1,103 +1,60 @@
-# Rebel Project Rules and Patterns
+# Cline Rules for Rebel Project
 
-## Coding Patterns
+## Memory System Insights
 
-### Rust Idioms
-- Use Rust's type system extensively to ensure memory safety
-- Prefer Option<T> returns for operations that might fail
-- Implement traits for common behavior patterns
-- Use the `thiserror` crate for Error enum definitions
+1. **Visibility Requirements**: Many methods in the memory system that were originally private need to be made public for proper testing. This includes:
+   - Address calculation methods
+   - Memory access methods
+   - Block and capacity management
 
-### Memory Management
-- The project uses custom memory management rather than relying solely on Rust's standard allocator
-- Tagged values (MemValue) combine a Word (u32) with a Tag (u8) for efficient type identification
-- Memory operations should be abstracted behind safe interfaces
-- Use Slice and SliceMut abstractions for memory access
+2. **Test Behavior**: The memory tests are sensitive to the exact memory layout and management. When tests fail, we should look for:
+   - Visibility issues (private methods being called in tests)
+   - Memory layout differences
+   - Initialization issues
+   - Changes to address calculations
 
-### Error Handling
-- Parser errors use the ParserError enum
-- Memory errors use the MemoryError enum 
-- Value collector errors use the ValueCollectorError enum
-- All errors implement the Error trait via thiserror
+3. **API Design Pattern**: The memory system uses the following pattern:
+   - Core methods for memory access are defined in `Memory`
+   - Specialized abstractions are built on top (LenAddress, CapAddress)
+   - Data structures (Stack, Block, etc.) use those abstractions
+   - Helper functions expose common operations
 
-### Value System
-- Values are represented as an enum in Rust code
-- Low-level representation uses tagged union approach
-- Provide helper methods for type checking and conversion
+4. **Implementation Notes**:
+   - Bounds checking is critical for all memory operations
+   - Memory initialization requires proper setup of all regions
+   - Memory operations typically return `Option<T>` to handle failure cases
+   - The `move_items` operation is a specialized function for memory block movement that requires cloning of addresses
 
-## Project Preferences
+## Documentation Guidelines
 
-### Documentation Style
-- Use descriptive doc comments for public interfaces
-- Include examples in documentation where appropriate
-- Document unsafe code blocks extensively
-- Comment complex algorithms with step-by-step explanations
+1. **Method Documentation**:
+   - Document all public methods with a brief description
+   - Focus on what the method does, not how
+   - Indicate any prerequisites or assumptions
+   - Document any safety considerations or unsafe operations
 
-### Testing Approach
-- Write test helpers to simplify test cases
-- Test both success and error paths
-- Include tests for edge cases and boundary conditions
-- Organize related tests in submodules
+2. **Documentation Balance**:
+   - Keep documentation concise but complete
+   - Essential for public API methods
+   - Internal methods require less extensive documentation
 
-### Code Structure
-- Keep modules focused on a single responsibility
-- Separate interface from implementation
-- Use traits for abstraction boundaries
-- Minimize public API surface
+3. **Testing Approach**:
+   - Prefer focused tests for specific components
+   - Keep parser-related tests separate from memory tests
+   - Use appropriate abstractions in tests
 
-## Critical Implementation Paths
+## Project Working Patterns
 
-### Parsing Flow
-1. Create a Parser instance with input and collector
-2. Parser processes input character by character
-3. Parser calls collector methods as tokens are recognized
-4. Collector builds data structures based on parser events
+1. **Development Workflow**:
+   - Work on one system component at a time
+   - Make sure to update documentation alongside code
+   - Keep the memory bank updated with new knowledge
+   - Fix test failures before moving on to new features
 
-### Value Building Flow
-1. ValueCollector implements Collector trait
-2. ValueCollector maintains a stack for nested structures
-3. End block/path operations pop from stack and build composite values
-4. Final result available via value() method
+2. **Code Organization**:
+   - Group related functions together
+   - Keep implementation details private when possible
+   - Expose a clean, well-documented public API
+   - Use consistent naming conventions
 
-### Memory Operations Flow
-1. Heap manages memory allocation
-2. Stack provides push/pop operations
-3. Slice/SliceMut provide safe access to memory regions
-4. Item trait defines how types are stored in memory
-
-## Known Challenges
-
-### Balancing Abstraction
-- The project uses multiple representations (Value/MemValue) that must be kept in sync
-- Each abstraction layer adds overhead but improves safety
-- Finding the right balance is an ongoing consideration
-
-### Memory Safety
-- Custom memory management requires careful handling
-- Unsafe code blocks should be minimal and well-tested
-- Memory operations should validate bounds
-
-### Parser Edge Cases
-- String escaping needs careful handling
-- Nested structures require proper stack management
-- Error recovery should be graceful
-
-## Project Evolution Tracking
-
-### Current Phase: Foundation Building
-- Core parsing functionality
-- Basic value representation
-- Memory management primitives
-- Test infrastructure
-
-### Next Phase: VM Development
-- Execution engine
-- Context/environment model
-- Function implementation
-- Basic standard library
-
-### Future Phase: Process Model
-- Process abstraction
-- Interprocess communication
-- Persistence mechanisms
-- Enhanced concurrency
+These guidelines and notes should help maintain consistency and quality as we continue to develop the Rebel interpreter.

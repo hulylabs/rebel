@@ -21,17 +21,30 @@
 
 ### Memory System (mem.rs)
 - ✅ Tagged value representation via `MemValue`
-- ✅ Basic memory allocation with `Heap`
+- ✅ Basic memory allocation with `Arena` (heap)
 - ✅ Stack-based value collection
-- ✅ Slice abstractions for memory access
+- ✅ Address abstractions (LenAddress, CapAddress) for memory access
+- ✅ Block, Stack, and String structure implementations
+- ✅ Symbol table for efficient string interning
 - ✅ Memory error handling
+- ✅ Public API for core memory operations
+- ✅ Basic unit tests for memory structures
 
 ### Testing Infrastructure
 - ✅ Unit tests for parser functionality
 - ✅ Unit tests for value system operations
 - ✅ Test helpers for building and validating structures
+- ✅ Tests for memory address operations
 
 ## What's Left to Build
+
+### Memory Management Improvements
+- 🔲 Fix current test failures in memory operations
+- 🔲 Improve memory access safety
+- 🔲 Optimize memory layout for better locality
+- 🔲 Add garbage collection system
+- 🔲 Memory optimization for long-running processes
+- 🔲 Persistent storage for process state
 
 ### Virtual Machine
 - 🔲 Execution engine for evaluating Rebel code
@@ -44,11 +57,6 @@
 - 🔲 Process creation and termination
 - 🔲 Interprocess communication
 - 🔲 Persistence and recovery mechanisms
-
-### Memory Management Enhancements
-- 🔲 Garbage collection system
-- 🔲 Memory optimization for long-running processes
-- 🔲 Persistent storage for process state
 
 ### Standard Library
 - 🔲 File and directory operations
@@ -71,31 +79,35 @@
 
 ## Current Status
 
-The project is in the **early development phase** with focus on establishing the core infrastructure. The foundation is being laid with a working parser, value system, and memory management primitives. Unit tests validate the behavior of implemented components.
+The project is in the **early development phase** with focus on establishing the core infrastructure. We have a working parser, value system, and the fundamentals of a memory management system. 
 
-Development appears to be following a bottom-up approach, building the low-level components first before moving on to the higher-level VM and language features.
+Currently, we're strengthening the memory subsystem by expanding its API, improving documentation, and enhancing test coverage. Some test failures indicate there are still issues to resolve with stack operations, string storage, symbol table, and block operations.
+
+Unit tests validate the behavior of implemented components, but we need to fix the remaining failures before moving forward with the VM implementation.
 
 ## Known Issues and Challenges
 
-While no specific bugs or issues are documented in the code, several challenges will need to be addressed as development continues:
+1. **Memory Testing**: Several memory system tests are failing, possibly due to API changes or underlying implementation issues.
 
-1. **Memory Safety**: Ensuring the memory management system is robust and doesn't leak, especially with complex nested structures.
+2. **Memory Safety**: Ensuring the memory management system is robust and doesn't leak, especially with complex nested structures.
 
-2. **Execution Performance**: Balancing the flexibility of a dynamic language with efficient execution.
+3. **Execution Performance**: Balancing the flexibility of a dynamic language with efficient execution.
 
-3. **Process Persistence**: Implementing robust persistence that can handle process state across restarts or migrations.
+4. **Process Persistence**: Implementing robust persistence that can handle process state across restarts or migrations.
 
-4. **Concurrency Model**: Determining how processes interact and communicate, especially with async operations.
+5. **Concurrency Model**: Determining how processes interact and communicate, especially with async operations.
 
-5. **Error Handling**: Developing a consistent approach to error reporting and recovery.
+6. **Error Handling**: Developing a consistent approach to error reporting and recovery.
 
-6. **Interoperability**: Ensuring Rebel can effectively interface with host systems and external libraries.
+7. **Interoperability**: Ensuring Rebel can effectively interface with host systems and external libraries.
 
-7. **AI Integration**: Refining the language design to be particularly suitable for AI agent use while remaining human-friendly.
+8. **AI Integration**: Refining the language design to be particularly suitable for AI agent use while remaining human-friendly.
 
 ## Next Milestone
 
-The likely next milestone would be a **minimal working VM** that can:
+The immediate milestone is to **fix memory system issues** and complete its documentation.
+
+After that, the next major milestone would be a **minimal working VM** that can:
 - Parse basic Rebel syntax
 - Evaluate simple expressions
 - Manage variable bindings in contexts
