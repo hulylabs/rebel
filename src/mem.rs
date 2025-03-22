@@ -1,6 +1,6 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use crate::parse::{Collector, WordKind};
+use crate::parse::{self, Collector, WordKind};
 use std::marker::PhantomData;
 use thiserror::Error;
 use xxhash_rust::xxh32::xxh32;
@@ -169,8 +169,8 @@ where
         Self(addr, PhantomData)
     }
 
-    pub fn len(&self, memory: &Memory) -> Option<Offset> {
-        self.0.len_address().get_len(memory)
+    pub fn len(&self, memory: &Memory) -> Option<Word> {
+        self.0.len_address().get_len(memory).map(|x| x / I::SIZE)
     }
 
     pub fn peek(&self, memory: &Memory) -> Option<I> {
@@ -321,28 +321,29 @@ pub struct Memory<'a> {
     memory: &'a mut [Word],
 }
 
+const LAYOUT_REGIONS: Offset = 4;
+
 impl<'a> Memory<'a> {
     const LAYOUT_OFFSET: Offset = 1;
-    const LAYOUT_REGIONS: Offset = 4;
 
     const LAYOUT_SYMBOL_TABLE: Offset = 0;
     const LAYOUT_PARSE_STACK: Offset = 1;
     const LAYOUT_PARSE_BASE: Offset = 2;
     const LAYOUT_HEAP: Offset = 3;
 
-    pub fn init(memory: &'a mut [u32], sizes: [Offset; 4]) -> Option<Self> {
+    pub fn init(memory: &'a mut [u32], sizes: [Offset; LAYOUT_REGIONS as usize]) -> Option<Self> {
         let mut memory = Self { memory };
 
         memory.set_word(0, 0x0BAD_F00D)?;
-        memory.make_block(Self::LAYOUT_OFFSET, Self::LAYOUT_REGIONS * 4)?;
+        memory.make_block(Self::LAYOUT_OFFSET, LAYOUT_REGIONS * 4)?;
 
-        debug_assert!(8 + Self::LAYOUT_REGIONS * 4 < 64);
+        debug_assert!((8 + LAYOUT_REGIONS * 4) < 64);
         let mut addr: u32 = 64;
 
         for (i, size) in sizes.iter().enumerate() {
             let cap = size.checked_sub(8)?;
             let cap_address = memory.make_cap(addr, cap)?;
-            memory.set_word(Self::LAYOUT_REGIONS + 1 + i as Offset, cap_address.0)?;
+            memory.set_word(LAYOUT_REGIONS + 1 + i as Offset, cap_address.0)?;
             addr += size;
         }
 
@@ -350,12 +351,24 @@ impl<'a> Memory<'a> {
     }
 
     fn get_region(&self, region: Offset) -> Option<CapAddress> {
-        let address = self.get_word(Self::LAYOUT_REGIONS + 1 + region)?;
-        Some(CapAddress(address))
+        self.get_word(Self::LAYOUT_OFFSET + 1 + region)
+            .map(CapAddress)
     }
 
     pub fn get_symbol_table(&self) -> Option<SymbolTable> {
         self.get_region(Self::LAYOUT_SYMBOL_TABLE).map(SymbolTable)
+    }
+
+    pub fn get_parse_stack(&self) -> Option<Stack<MemValue>> {
+        self.get_region(Self::LAYOUT_PARSE_STACK).map(Stack::new)
+    }
+
+    pub fn get_parse_base(&self) -> Option<Stack<Word>> {
+        self.get_region(Self::LAYOUT_PARSE_BASE).map(Stack::new)
+    }
+
+    pub fn get_heap(&self) -> Option<Arena> {
+        self.get_region(Self::LAYOUT_HEAP).map(Arena)
     }
 
     fn make_block(&mut self, address: Offset, len: Word) -> Option<LenAddress> {
@@ -386,7 +399,6 @@ impl<'a> Memory<'a> {
         let src = (from_data_address_bytes + from_new_data_len_bytes) as usize;
         let dst = (to_data_address_bytes + to_new_data_len_bytes) as usize;
         let size = size_bytes as usize;
-        // memory_bytes.copy_within(src..src + size, dst);
 
         if dst + size > memory_bytes.len() || src + size > memory_bytes.len() {
             None
@@ -419,6 +431,19 @@ impl<'a> Memory<'a> {
         let start = start as usize;
         let end = start + len as usize;
         self.memory.get_mut(start..end)
+    }
+
+    // P A R S E  H E L P E R S
+
+    fn begin(&mut self) -> Option<()> {
+        let len = self.get_parse_stack()?.len(self)?;
+        self.get_parse_base()?.push(len, self)
+    }
+
+    fn end(&mut self) -> Option<Block<MemValue>> {
+        let offset = self.get_parse_base()?.pop(self)?;
+        self.get_parse_stack()?
+            .cut_block(self.get_heap()?.0.clone(), offset, self)
     }
 }
 
@@ -518,57 +543,25 @@ impl Item for MemValue {
 
 // P A R S E  C O L L E C T O R
 
-struct ParseCollector<'a> {
-    memory: &'a mut Memory<'a>,
-    heap: Arena,
-    parse: Stack<MemValue>,
-    base: Stack<Word>,
-}
+// struct ParseCollector<'a> {
+//     memory: &'a mut Memory<'a>,
+// }
 
-impl<'a> ParseCollector<'a> {
-    fn new(
-        memory: &'a mut Memory<'a>,
-        heap: Arena,
-        parse: Stack<MemValue>,
-        base: Stack<Word>,
-    ) -> Self {
-        Self {
-            memory,
-            heap,
-            parse,
-            base,
-        }
-    }
+// impl<'a> ParseCollector<'a> {
+//     fn new(memory: &'a mut Memory<'a>) -> Self {
+//         Self { memory }
+//     }
+// }
 
-    fn begin(&mut self) -> Option<()> {
-        let len = self.parse.len(self.memory)? as Word;
-        self.base.push(len, self.memory)
-    }
-
-    fn end(&mut self) -> Option<Block<MemValue>> {
-        self.parse.cut_block(
-            self.heap.0.clone(),
-            self.base.pop(self.memory)?,
-            self.memory,
-        )
-    }
-
-    fn get_symbol(&mut self, symbol: &str) -> Option<LenAddress> {
-        self.memory
-            .get_symbol_table()
-            .and_then(|table| table.get_or_insert_symbol(symbol, self.heap.clone(), self.memory))
-    }
-}
-
-impl Collector for ParseCollector<'_> {
+impl Collector for Memory<'_> {
     type Error = MemoryError;
 
     fn string(&mut self, string: &str) -> Option<()> {
         let string = self
-            .heap
-            .alloc_string(self.memory, string)
+            .get_heap()?
+            .alloc_string(self, string)
             .map(MemValue::string)?;
-        self.parse.push(string, self.memory)
+        self.get_parse_stack()?.push(string, self)
     }
 
     fn word(&mut self, kind: WordKind, word: &str) -> Option<()> {
@@ -577,12 +570,15 @@ impl Collector for ParseCollector<'_> {
             WordKind::SetWord => MemValue::TAG_SET_WORD,
             WordKind::GetWord => MemValue::TAG_GET_WORD,
         };
-        let value = MemValue(self.get_symbol(word)?.0, tag);
-        self.parse.push(value, self.memory)
+        let symbol =
+            self.get_symbol_table()?
+                .get_or_insert_symbol(word, self.get_heap()?.clone(), self)?;
+        let value = MemValue(symbol.0, tag);
+        self.get_parse_stack()?.push(value, self)
     }
 
     fn integer(&mut self, value: i32) -> Option<()> {
-        self.parse.push(MemValue::int(value), self.memory)
+        self.get_parse_stack()?.push(MemValue::int(value), self)
     }
 
     fn begin_block(&mut self) -> Option<()> {
@@ -591,7 +587,7 @@ impl Collector for ParseCollector<'_> {
 
     fn end_block(&mut self) -> Option<()> {
         let block = self.end().map(MemValue::block)?;
-        self.parse.push(block, self.memory)
+        self.get_parse_stack()?.push(block, self)
     }
 
     fn begin_path(&mut self) -> Option<()> {
@@ -600,7 +596,7 @@ impl Collector for ParseCollector<'_> {
 
     fn end_path(&mut self) -> Option<()> {
         let block = self.end().map(MemValue::path)?;
-        self.parse.push(block, self.memory)
+        self.get_parse_stack()?.push(block, self)
     }
 }
 
@@ -622,23 +618,9 @@ pub fn get(memory: &Memory, block: &Block<u8>, index: Offset) -> Option<u8> {
     block.get(index, memory)
 }
 
-pub fn parse_block<'a>(
-    memory: &'a mut Memory<'a>,
-    heap: Arena,
-    input: &str,
-) -> Option<Stack<MemValue>> {
-    // let mut parser_memory = Memory::new(Box::new([0; 1024]).as_mut());
-
-    // let parse = heap.alloc_stack::<MemValue>(100, memory)?;
-    // let base = heap.alloc_stack::<Word>(20, memory)?;
-
-    let parse = Stack::<MemValue>(CapAddress(0), PhantomData);
-    let base = Stack::<Word>(CapAddress(1024), PhantomData);
-
-    let mut collector = ParseCollector::new(memory, heap, parse, base);
-    crate::parse::Parser::parse(input, &mut collector).ok()?;
-
-    // heap.alloc_block::<MemValue>(memory, &[0; 8])?;
-
-    Some(collector.parse)
+pub fn parse_block<'a>(memory: &'a mut Memory<'a>, input: &str) -> Option<Block<MemValue>> {
+    crate::parse::Parser::parse(input, memory).ok()?;
+    let parse = memory.get_parse_stack()?;
+    let heap = memory.get_heap()?;
+    parse.cut_block(heap.0, parse.len(memory)?, memory)
 }
