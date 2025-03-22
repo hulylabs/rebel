@@ -114,12 +114,12 @@ impl CapAddress {
         })
     }
 
-    // fn alloc_cap(&self, size: Offset, memory: &mut Memory) -> Option<CapAddress> {
-    //     let cap = self.reserve_slot(size + 8, memory).map(CapAddress)?;
-    //     cap.set_cap(size, memory)?;
-    //     cap.len_address().set_len(0, memory)?;
-    //     Some(cap)
-    // }
+    fn alloc_cap(&self, size: Offset, memory: &mut Memory) -> Option<CapAddress> {
+        let cap = self.reserve_slot(size + 8, memory).map(CapAddress)?;
+        cap.set_cap(size, memory)?;
+        cap.len_address().set_len(0, memory)?;
+        Some(cap)
+    }
 
     fn len_address(&self) -> LenAddress {
         LenAddress(self.0 + 4)
@@ -141,7 +141,7 @@ impl<I> Stack<I>
 where
     I: Item,
 {
-    pub fn new(addr: CapAddress) -> Self {
+    fn new(addr: CapAddress) -> Self {
         Self(addr, PhantomData)
     }
 
@@ -176,9 +176,9 @@ where
             .map(Block::new)
     }
 
-    fn drain_all(&self, to: CapAddress, memory: &mut Memory) -> Option<Block<I>> {
-        self.drain(to, self.len(memory)?, memory)
-    }
+    // fn drain_all(&self, to: CapAddress, memory: &mut Memory) -> Option<Block<I>> {
+    //     self.drain(to, self.len(memory)?, memory)
+    // }
 }
 
 pub struct Block<I>(LenAddress, PhantomData<I>);
@@ -187,7 +187,7 @@ impl<I> Block<I>
 where
     I: Item,
 {
-    pub fn new(addr: LenAddress) -> Self {
+    fn new(addr: LenAddress) -> Self {
         Self(addr, PhantomData)
     }
 
@@ -212,12 +212,12 @@ where
 pub struct Arena(CapAddress);
 
 impl Arena {
-    pub fn new(addr: CapAddress) -> Self {
-        Self(addr)
-    }
+    // fn new(addr: CapAddress) -> Self {
+    //     Self(addr)
+    // }
 
     pub fn alloc_stack<I: Item>(&self, items: Word, memory: &mut Memory) -> Option<Stack<I>> {
-        Some(Stack::new(self.0))
+        self.0.alloc_cap(items * I::SIZE, memory).map(Stack::new)
     }
 
     pub fn alloc_block<I: Item>(&self, memory: &mut Memory, data: &[u8]) -> Option<Block<I>> {
@@ -473,11 +473,18 @@ pub fn parse_block<'a>(
     heap: Arena,
     input: &str,
 ) -> Option<Stack<MemValue>> {
-    let parse = heap.alloc_stack::<MemValue>(100, memory)?;
-    let base = heap.alloc_stack::<Word>(20, memory)?;
+    // let mut parser_memory = Memory::new(Box::new([0; 1024]).as_mut());
+
+    // let parse = heap.alloc_stack::<MemValue>(100, memory)?;
+    // let base = heap.alloc_stack::<Word>(20, memory)?;
+
+    let parse = Stack::<MemValue>(CapAddress(0), PhantomData);
+    let base = Stack::<Word>(CapAddress(1024), PhantomData);
 
     let mut collector = ParseCollector::new(memory, heap, parse, base);
     crate::parse::Parser::parse(input, &mut collector).ok()?;
+
+    // heap.alloc_block::<MemValue>(memory, &[0; 8])?;
 
     Some(collector.parse)
 }
