@@ -1,6 +1,6 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use crate::parse::{self, Collector, WordKind};
+use crate::parse::{Collector, WordKind};
 use std::marker::PhantomData;
 use thiserror::Error;
 use xxhash_rust::xxh32::xxh32;
@@ -170,7 +170,10 @@ where
     }
 
     pub fn len(&self, memory: &Memory) -> Option<Word> {
-        self.0.len_address().get_len(memory).map(|x| x / I::SIZE)
+        self.0
+            .len_address()
+            .get_len(memory)
+            .and_then(|x| x.checked_div(I::SIZE))
     }
 
     pub fn peek(&self, memory: &Memory) -> Option<I> {
@@ -284,13 +287,16 @@ impl SymbolTable {
         heap: Arena,
         memory: &mut Memory,
     ) -> Option<LenAddress> {
+        let cap = self.0.get_cap(memory)?;
+        if cap == 0 {
+            return None;
+        }
         let len_address = self.0.len_address();
         let count = len_address.get_len(memory)?;
 
         let bytes = symbol.as_bytes();
         let hash = xxh32(bytes, Self::HASH_SEED);
 
-        let cap = self.0.get_cap(memory)?;
         let data_address = self.0.data_address();
         let start = hash % cap;
         let mut index = start;
@@ -542,16 +548,6 @@ impl Item for MemValue {
 }
 
 // P A R S E  C O L L E C T O R
-
-// struct ParseCollector<'a> {
-//     memory: &'a mut Memory<'a>,
-// }
-
-// impl<'a> ParseCollector<'a> {
-//     fn new(memory: &'a mut Memory<'a>) -> Self {
-//         Self { memory }
-//     }
-// }
 
 impl Collector for Memory<'_> {
     type Error = MemoryError;
