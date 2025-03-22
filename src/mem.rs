@@ -91,10 +91,10 @@ impl CapAddress {
         memory.get_word(self.address())
     }
 
-    fn get_data<'a>(&self, memory: &'a Memory) -> Option<&'a [Word]> {
-        let cap = self.get_cap(memory)?;
-        memory.get(self.data_address(), cap)
-    }
+    // fn get_data<'a>(&self, memory: &'a Memory) -> Option<&'a [Word]> {
+    //     let cap = self.get_cap(memory)?;
+    //     memory.get(self.data_address(), cap)
+    // }
 
     // fn set_cap(&self, cap: Offset, memory: &mut Memory) -> Option<()> {
     //     memory
@@ -337,6 +337,7 @@ impl<'a> Memory<'a> {
     const LAYOUT_PARSE_BASE: Offset = 2;
     const LAYOUT_HEAP: Offset = 3;
 
+    #[allow(clippy::assertions_on_constants)]
     pub fn init(memory: &'a mut [u32], sizes: [Offset; LAYOUT_REGIONS as usize]) -> Option<Self> {
         let mut memory = Self { memory };
 
@@ -459,7 +460,7 @@ impl Item for u8 {
     const SIZE: Offset = 1;
 
     fn load(data: &[u8]) -> Option<Self> {
-        data.get(0).copied()
+        data.first().copied()
     }
 
     fn store(self, data: &mut [u8]) -> Option<()> {
@@ -538,9 +539,10 @@ impl Item for MemValue {
         if data.len() < 5 {
             None
         } else {
-            for i in 0..4 {
-                data[i] = addr_bytes[i];
-            }
+            // for i in 0..4 {
+            //     data[i] = addr_bytes[i];
+            // }
+            data[..4].copy_from_slice(&addr_bytes);
             data[4] = tag;
             Some(())
         }

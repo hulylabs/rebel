@@ -350,7 +350,8 @@ impl Collector for ValueCollector {
     type Error = ValueCollectorError;
 
     fn string(&mut self, string: &str) -> Option<()> {
-        Some(self.push_value(Value::string(string)))
+        self.push_value(Value::string(string));
+        Some(())
     }
 
     fn word(&mut self, kind: WordKind, word: &str) -> Option<()> {
@@ -359,11 +360,13 @@ impl Collector for ValueCollector {
             WordKind::SetWord => Value::set_word(word),
             WordKind::GetWord => Value::get_word(word),
         };
-        Some(self.push_value(value))
+        self.push_value(value);
+        Some(())
     }
 
     fn integer(&mut self, value: i32) -> Option<()> {
-        Some(self.push_value(Value::int(value)))
+        self.push_value(Value::int(value));
+        Some(())
     }
 
     fn begin_block(&mut self) -> Option<()> {
