@@ -1,9 +1,9 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
 use crate::parse::{Collector, WordKind};
-use std::{marker::PhantomData, mem};
+use std::marker::PhantomData;
 use thiserror::Error;
-use xxhash_rust::const_xxh32::xxh32;
+use xxhash_rust::xxh32::xxh32;
 
 #[derive(Debug, Error)]
 pub enum MemoryError {
@@ -25,109 +25,124 @@ pub trait Item: Sized {
     fn store(self, data: &mut [u8]) -> Option<()>;
 }
 
+#[derive(Debug, Clone)]
 struct LenAddress(Offset);
 
 impl LenAddress {
-    fn drain(&self, size: Offset, memory: &mut Memory) -> Option<Offset> {
-        let len = self.get_len(memory)?;
-        let start = len.checked_sub(size)?;
-        self.set_len(start, memory)?;
-        Some(start)
+    // fn drain(&self, size: Offset, memory: &mut Memory) -> Option<Offset> {
+    //     let len = self.get_len(memory)?;
+    //     let start = len.checked_sub(size)?;
+    //     self.set_len(start, memory)?;
+    //     Some(start)
+    // }
+
+    /// in bytes
+    fn get_len(&self, memory: &Memory) -> Option<Word> {
+        memory.get_word(self.address())
     }
 
-    fn get_len(&self, memory: &Memory) -> Option<Offset> {
-        let address = self.address();
-        memory
-            .get(address, 4)?
-            .try_into()
-            .ok()
-            .map(u32::from_le_bytes)
+    /// in bytes
+    fn set_len(&self, len: Word, memory: &mut Memory) -> Option<()> {
+        memory.set_word(self.address(), len)
     }
 
-    fn set_len(&self, len: Offset, memory: &mut Memory) -> Option<()> {
-        let address = self.0;
-        let len = len.to_le_bytes();
-        memory
-            .get_mut(address, 4)
-            .map(|slot| slot.copy_from_slice(&len))
-    }
+    // fn get_len_mut<'a>(&self, memory: &'a mut Memory) -> Option<&'a mut Word> {
+    //     memory.get_word_mut(self.address())
+    // }
 
     fn address(&self) -> Offset {
         self.0
     }
 
     fn data_address(&self) -> Offset {
-        self.0 + 4
+        self.0 + 1
+    }
+
+    fn get_data(&self, memory: &Memory) -> Option<&[u8]> {
+        let len = self.get_len(memory)?; // in bytes
+        let words = (len + 3) / 4;
+        let data = memory.get(self.data_address(), words)?;
+        let data = unsafe { std::mem::transmute::<&[Word], &[u8]>(data) };
+        data.get(..len as usize)
+    }
+
+    fn get_data_mut(&self, memory: &mut Memory) -> Option<&mut [u8]> {
+        let len = self.get_len(memory)?; // in bytes
+        let words = (len + 3) / 4;
+        let data = memory.get_mut(self.data_address(), words)?;
+        let data = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(data) };
+        Some(&mut data[..len as usize])
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct CapAddress(Offset);
 
 impl CapAddress {
-    fn init(&self, cap: Offset, memory: &mut Memory) -> Option<()> {
-        let data_cap = cap.checked_sub(8)?;
-        self.set_cap(data_cap, memory)?;
-        self.len_address().set_len(0, memory)?;
-        Some(())
-    }
+    // fn init(&self, cap: Offset, memory: &mut Memory) -> Option<()> {
+    //     let data_cap = cap.checked_sub(8)?;
+    //     self.set_cap(data_cap, memory)?;
+    //     self.len_address().set_len(0, memory)?;
+    //     Some(())
+    // }
 
+    // in words, not including header (cap, len)
     fn get_cap(&self, memory: &Memory) -> Option<Word> {
-        memory
-            .get(self.address(), 4)
-            .and_then(|slot| slot.try_into().ok())
-            .map(u32::from_le_bytes)
+        memory.get_word(self.address())
     }
 
-    fn set_cap(&self, cap: Offset, memory: &mut Memory) -> Option<()> {
-        memory
-            .get_mut(self.address(), 4)
-            .map(|slot| slot.copy_from_slice(&u32::to_le_bytes(cap)))
+    fn get_data<'a>(&self, memory: &'a Memory) -> Option<&'a [Word]> {
+        let cap = self.get_cap(memory)?;
+        memory.get(self.data_address(), cap)
     }
 
-    fn reserve_slot(&self, size: Offset, memory: &mut Memory) -> Option<Offset> {
-        let address = self.address();
-        let header = memory.get_mut(address, 8)?;
+    // fn set_cap(&self, cap: Offset, memory: &mut Memory) -> Option<()> {
+    //     memory
+    //         .get_mut(self.address(), 4)
+    //         .map(|slot| slot.copy_from_slice(&u32::to_le_bytes(cap)))
+    // }
 
-        let cap = u32::from_le_bytes(header[0..4].try_into().ok()?);
-        let len = u32::from_le_bytes(header[4..8].try_into().ok()?);
+    fn alloc_slot(&self, size_bytes: Word, memory: &mut Memory) -> Option<&mut [u8]> {
+        let cap_words = self.get_cap(memory)?;
+        let len_address = self.len_address();
+        let len = len_address.get_len(memory)?;
+        let new_len = len + size_bytes;
 
-        let new_len = len + size as Offset;
-        if new_len <= cap {
-            header[4..8].copy_from_slice(&new_len.to_le_bytes());
-            Some(self.data_address() + len)
+        if new_len <= cap_words * 4 {
+            let object = memory.get_mut(self.data_address(), cap_words)?;
+            let bytes = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(object) };
+            let slot = bytes.get_mut(len as usize..new_len as usize)?;
+            len_address.set_len(new_len, memory)?;
+            Some(slot)
         } else {
             None
         }
     }
 
-    fn reserve_len(&self, size: Offset, memory: &mut Memory) -> Option<LenAddress> {
-        self.reserve_slot(size + 4, memory)
-            .map(LenAddress)
-            .inspect(|x| {
-                x.set_len(size, memory).unwrap();
-            })
-    }
-
-    fn alloc_len(&self, data: &[u8], memory: &mut Memory) -> Option<LenAddress> {
-        let len = data.len() as Offset;
-        self.reserve_len(len, memory).inspect(|addr| {
-            memory
-                .get_mut(addr.data_address(), len)
-                .unwrap()
-                .copy_from_slice(data);
+    fn reserve_block(&self, size_bytes: Word, memory: &mut Memory) -> Option<LenAddress> {
+        let aligned_len = (size_bytes + 3) & !3;
+        self.alloc_slot(4 + aligned_len, memory).map(|slot| {
+            slot[0..4].copy_from_slice(&u32::to_le_bytes(size_bytes));
+            LenAddress(self.0 + 1)
         })
     }
 
-    fn alloc_cap(&self, size: Offset, memory: &mut Memory) -> Option<CapAddress> {
-        let to_allocate = size + 8;
-        let cap = self.reserve_slot(to_allocate, memory).map(CapAddress)?;
-        cap.init(to_allocate, memory)?;
-        Some(cap)
+    fn alloc_block(&self, data: &[u8], memory: &mut Memory) -> Option<LenAddress> {
+        let data_len = data.len() as Offset;
+        let block = self.reserve_block(data_len, memory)?;
+        block.get_data_mut(memory)?.copy_from_slice(data);
+        Some(block)
     }
 
+    // fn alloc_cap(&self, size_bytes: Offset, memory: &mut Memory) -> Option<CapAddress> {
+    //     let to_allocate = size_words + 8;
+    //     let cap = self.reserve_slot(to_allocate, memory).map(CapAddress)?;
+    //     cap.init(to_allocate, memory)?;
+    //     Some(cap)
+    // }
+
     fn len_address(&self) -> LenAddress {
-        LenAddress(self.0 + 4)
+        LenAddress(self.0 + 1)
     }
 
     fn address(&self) -> Offset {
@@ -135,7 +150,7 @@ impl CapAddress {
     }
 
     fn data_address(&self) -> Offset {
-        self.0 + 8
+        self.0 + 2
     }
 }
 
@@ -154,31 +169,44 @@ where
     }
 
     pub fn peek(&self, memory: &Memory) -> Option<I> {
-        let len = self.0.len_address().get_len(memory)?;
+        let len_address = self.0.len_address();
+        let len = len_address.get_len(memory)?;
         let start = len.checked_sub(I::SIZE)?;
-        let data = self.0.data_address();
-        memory.get(data + start, I::SIZE).and_then(I::load)
+        let data = len_address.get_data(memory)?;
+        let start = start as usize;
+        let end = start + I::SIZE as usize;
+        data.get(start..end).and_then(I::load)
     }
 
     pub fn push(&self, item: I, memory: &mut Memory) -> Option<()> {
         self.0
-            .reserve_slot(I::SIZE, memory)
-            .and_then(|slot| item.store(memory.get_mut(slot, I::SIZE)?))
+            .alloc_slot(I::SIZE, memory)
+            .and_then(|slot| item.store(slot))
     }
 
     pub fn pop(&self, memory: &mut Memory) -> Option<I> {
-        self.0
-            .len_address()
-            .drain(I::SIZE, memory)
-            .and_then(|offset| memory.get(offset, I::SIZE))
-            .and_then(I::load)
+        let len_address = self.0.len_address();
+        let len = len_address.get_len(memory)?;
+        let start = len.checked_sub(I::SIZE)?;
+        let data = len_address.get_data(memory)?;
+        let begin = start as usize;
+        let end = begin + I::SIZE as usize;
+        len_address.set_len(start, memory)?;
+        data.get(begin..end).and_then(I::load)
     }
 
-    fn drain(&self, to: CapAddress, items: Word, memory: &mut Memory) -> Option<Block<I>> {
-        memory
-            .cut_and_paste(to, self.0.len_address(), items * I::SIZE)
-            .map(Block::new)
+    fn cut_block(&self, to: CapAddress, items: Word, memory: &mut Memory) -> Option<Block<I>> {
+        let size_bytes = items * I::SIZE;
+        let dst = to.reserve_block(size_bytes, memory)?;
+        memory.move_items(dst.clone(), self.0.len_address(), size_bytes)?;
+        Some(Block::new(dst))
     }
+
+    // fn drain(&self, to: CapAddress, items: Word, memory: &mut Memory) -> Option<Block<I>> {
+    //     memory
+    //         .cut_and_paste(to, self.0.len_address(), items * I::SIZE)
+    //         .map(Block::new)
+    // }
 
     // fn drain_all(&self, to: CapAddress, memory: &mut Memory) -> Option<Block<I>> {
     //     self.drain(to, self.len(memory)?, memory)
@@ -200,15 +228,10 @@ where
     }
 
     pub fn get(&self, index: Word, memory: &Memory) -> Option<I> {
-        let len = self.len(memory)?;
-        let item_start = index * I::SIZE;
-        let item_end = (index + 1) * I::SIZE;
-        if item_end <= len {
-            let data = self.0.data_address();
-            memory.get(data + item_start, I::SIZE).and_then(I::load)
-        } else {
-            None
-        }
+        let data = self.0.get_data(memory)?;
+        let start = (index * I::SIZE) as usize;
+        let sned = start + I::SIZE as usize;
+        data.get(start..sned).and_then(I::load)
     }
 }
 
@@ -219,9 +242,8 @@ impl Str {
         self.0.get_len(memory)
     }
 
-    pub fn as_bytes<'a>(&self, memory: &'a Memory) -> Option<&'a [u8]> {
-        let len = self.len(memory)?;
-        memory.get(self.0.data_address(), len)
+    pub fn as_bytes(&self, memory: &Memory) -> Option<&[u8]> {
+        self.0.get_data(memory)
     }
 }
 
@@ -232,16 +254,16 @@ impl Arena {
     //     Self(addr)
     // }
 
-    pub fn alloc_stack<I: Item>(&self, items: Word, memory: &mut Memory) -> Option<Stack<I>> {
-        self.0.alloc_cap(items * I::SIZE, memory).map(Stack::new)
-    }
+    // pub fn alloc_stack<I: Item>(&self, items: Word, memory: &mut Memory) -> Option<Stack<I>> {
+    //     self.0.alloc_cap(items * I::SIZE, memory).map(Stack::new)
+    // }
 
-    pub fn alloc_block<I: Item>(&self, memory: &mut Memory, data: &[u8]) -> Option<Block<I>> {
-        self.0.alloc_len(data, memory).map(Block::new)
-    }
+    // pub fn alloc_block<I: Item>(&self, memory: &mut Memory, data: &[u8]) -> Option<Block<I>> {
+    //     self.0.alloc_len(data, memory).map(Block::new)
+    // }
 
     pub fn alloc_string(&self, memory: &mut Memory, string: &str) -> Option<Str> {
-        self.0.alloc_len(string.as_bytes(), memory).map(Str)
+        self.0.alloc_block(string.as_bytes(), memory).map(Str)
     }
 }
 
@@ -256,27 +278,24 @@ impl SymbolTable {
         heap: Arena,
         memory: &mut Memory,
     ) -> Option<LenAddress> {
-        let cap_bytes = self.0.get_cap(memory)?;
         let len_address = self.0.len_address();
         let count = len_address.get_len(memory)?;
 
         let bytes = symbol.as_bytes();
         let hash = xxh32(bytes, Self::HASH_SEED);
 
-        let cap = (cap_bytes - 8) / 4;
-
+        let cap = self.0.get_cap(memory)?;
+        let data_address = self.0.data_address();
         let start = hash % cap;
         let mut index = start;
-        loop {
-            let entry_addr = self.0.data_address() + index * 4;
-            let entry = memory.read_u32(entry_addr)?;
 
+        loop {
+            let entry = memory.get_word(data_address + index)?;
             if entry == 0 {
                 let str = heap.alloc_string(memory, symbol)?;
-                let address = str.0;
-                memory.write_u32(entry_addr, address.0)?;
+                memory.set_word(data_address + index, str.0.0)?;
                 len_address.set_len(count + 1, memory)?;
-                return Some(address);
+                return Some(str.0);
             }
 
             let stored = Str(LenAddress(entry));
@@ -293,73 +312,94 @@ impl SymbolTable {
 }
 
 pub struct Memory<'a> {
-    memory: &'a mut [u8],
+    memory: &'a mut [Word],
 }
 
 impl<'a> Memory<'a> {
-    const LAYOUT_SYMBOL_TABLE: u32 = 0;
-    const LAYOUT_PARSE_STACK: u32 = 1;
-    const LAYOUT_PARSE_BASE: u32 = 2;
-    const LAYOUT_HEAP: u32 = 3;
+    const LAYOUT_SYMBOL_TABLE: Offset = 0;
+    const LAYOUT_PARSE_STACK: Offset = 1;
+    const LAYOUT_PARSE_BASE: Offset = 2;
+    const LAYOUT_HEAP: Offset = 3;
 
-    const LAYOUT_REGIONS: u32 = 4;
+    const LAYOUT_REGIONS: Offset = 4;
 
-    pub fn init(memory: &'a mut [u8], sizes: [Offset; 4]) -> Self {
-        let mut addr: u32 = 0;
-        for &size in sizes.iter() {
-            let cap = CapAddress(addr);
-            cap.set_cap(size, &mut Self { memory });
-            addr += size;
-        }
+    // move bytes from one block to another. we assume target block has slot allocated already -- we replace the data
+    fn move_items(&mut self, to: LenAddress, from: LenAddress, size_bytes: Word) -> Option<()> {
+        let to_data_address_bytes = to.data_address() * 4;
+        let to_data_len_bytes = to.get_len(self)?;
+        let to_new_data_len_bytes = to_data_len_bytes.checked_sub(size_bytes)?;
 
-        Self { memory }
-    }
+        let from_data_address_bytes = from.data_address() * 4;
+        let from_data_len_bytes = from.get_len(self)?;
+        let from_new_data_len_bytes = from_data_len_bytes.checked_sub(size_bytes)?;
 
-    fn read_u32(&self, offset: Offset) -> Option<u32> {
-        self.get(offset, 4)?.try_into().ok().map(u32::from_le_bytes)
-    }
+        let memory_bytes = unsafe { std::mem::transmute::<&mut [Word], &mut [u8]>(self.memory) };
 
-    fn write_u32(&mut self, offset: Offset, value: u32) -> Option<()> {
-        let bytes = value.to_le_bytes();
-        self.get_mut(offset, 4)?.copy_from_slice(&bytes);
+        let src = (from_data_address_bytes + from_new_data_len_bytes) as usize;
+        let dst = (to_data_address_bytes + to_new_data_len_bytes) as usize;
+        let size = size_bytes as usize;
+        memory_bytes.copy_within(src..src + size, dst);
+
+        from.set_len(from_new_data_len_bytes, self)?;
         Some(())
     }
 
-    fn copy(&mut self, dst: Offset, src: Offset, size: Offset) -> Option<()> {
-        let size = size as usize;
-        let dst = dst as usize;
-        if dst + size > self.memory.len() {
-            return None;
-        }
-        let src = src as usize;
-        if src + size > self.memory.len() {
-            return None;
-        }
-        for i in 0..size {
-            self.memory[dst + i] = self.memory[src + i];
-        }
-        Some(())
+    // pub fn init(memory: &'a mut [u8], sizes: [Offset; 4]) -> Self {
+    //     let mut addr: u32 = 0;
+    //     for &size in sizes.iter() {
+    //         let cap = CapAddress(addr);
+    //         cap.set_cap(size, &mut Self { memory });
+    //         addr += size;
+    //     }
+
+    //     Self { memory }
+    // }
+
+    // fn copy(&mut self, dst: Offset, src: Offset, size: Offset) -> Option<()> {
+    //     let size = size as usize;
+    //     let dst = dst as usize;
+    //     if dst + size > self.memory.len() {
+    //         return None;
+    //     }
+    //     let src = src as usize;
+    //     if src + size > self.memory.len() {
+    //         return None;
+    //     }
+    //     for i in 0..size {
+    //         self.memory[dst + i] = self.memory[src + i];
+    //     }
+    //     Some(())
+    // }
+
+    // fn cut_and_paste(
+    //     &mut self,
+    //     to: CapAddress,
+    //     from: LenAddress,
+    //     size: Offset,
+    // ) -> Option<LenAddress> {
+    //     let src = from.drain(size, self)?;
+    //     let dst = to.reserve_len(size, self)?;
+    //     self.copy(dst.data_address(), src, size)?;
+    //     Some(dst)
+    // }
+
+    fn get_word(&self, address: Offset) -> Option<Word> {
+        self.memory.get(address as usize).copied()
     }
 
-    fn cut_and_paste(
-        &mut self,
-        to: CapAddress,
-        from: LenAddress,
-        size: Offset,
-    ) -> Option<LenAddress> {
-        let src = from.drain(size, self)?;
-        let dst = to.reserve_len(size, self)?;
-        self.copy(dst.data_address(), src, size)?;
-        Some(dst)
+    fn set_word(&mut self, address: Offset, word: Word) -> Option<()> {
+        self.memory
+            .get_mut(address as usize)
+            .map(|slot| *slot = word)
     }
 
-    fn get(&self, start: Offset, len: Offset) -> Option<&[u8]> {
+    fn get(&self, start: Offset, len: Offset) -> Option<&[Word]> {
         let start = start as usize;
         let end = start + len as usize;
         self.memory.get(start..end)
     }
 
-    fn get_mut(&mut self, start: Offset, len: Offset) -> Option<&mut [u8]> {
+    fn get_mut(&mut self, start: Offset, len: Offset) -> Option<&mut [Word]> {
         let start = start as usize;
         let end = start + len as usize;
         self.memory.get_mut(start..end)
@@ -486,8 +526,11 @@ impl<'a> ParseCollector<'a> {
     }
 
     fn end(&mut self) -> Option<Block<MemValue>> {
-        self.parse
-            .drain(self.heap.0, self.base.pop(self.memory)?, self.memory)
+        self.parse.cut_block(
+            self.heap.0.clone(),
+            self.base.pop(self.memory)?,
+            self.memory,
+        )
     }
 }
 

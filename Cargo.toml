@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 smol_str = "0.3.2"
 thiserror = "2.0.12"
-xxhash-rust = { version = "0.8.15", features = ["xxh32", "const_xxh32"] }
+xxhash-rust = { version = "0.8.15", features = ["xxh32"] }
