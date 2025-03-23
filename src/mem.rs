@@ -58,7 +58,7 @@ fn u32_slice_to_u8_slice_mut(slice: &mut [u32]) -> &mut [u8] {
 }
 
 /// Address pointing to a length-prefixed block of memory
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct LenAddress(pub Offset);
 
 impl LenAddress {
@@ -277,13 +277,13 @@ where
     pub fn cut_block(&self, to: CapAddress, items: Word, memory: &mut Memory) -> Option<Block<I>> {
         let size_bytes = items * I::SIZE;
         let dst = to.reserve_block(size_bytes, memory)?;
-        memory.move_items(dst.clone(), self.0.len_address(), size_bytes)?;
+        memory.move_items(dst, self.0.len_address(), size_bytes)?;
         Some(Block::new(dst))
     }
 }
 
 /// Block data structure for storing a sequence of items of type I
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Block<I>(LenAddress, PhantomData<I>);
 
 impl<I> Block<I>
@@ -317,6 +317,7 @@ where
 }
 
 /// String data structure for storing UTF-8 encoded text
+#[derive(Debug, Clone, Copy)]
 pub struct Str(LenAddress);
 
 impl Str {
@@ -501,7 +502,7 @@ impl<'a> Memory<'a> {
         self.get_region(Self::LAYOUT_SYMBOL_TABLE).map(SymbolTable)
     }
 
-    pub fn get_parse_stack(&self) -> Option<Stack<MemValue>> {
+    pub fn get_parse_stack(&self) -> Option<Stack<VmValue>> {
         self.get_region(Self::LAYOUT_PARSE_STACK).map(Stack::new)
     }
 
@@ -582,11 +583,11 @@ impl<'a> Memory<'a> {
         self.get_parse_base()?.push(len, self)
     }
 
-    pub fn end(&mut self) -> Option<Block<MemValue>> {
+    pub fn end(&mut self) -> Option<Block<VmValue>> {
         let offset = self.get_parse_base()?.pop(self)?;
         let stack = self.get_parse_stack()?;
         let items = stack.len(self).and_then(|len| len.checked_sub(offset))?;
-        stack.cut_block(self.get_heap()?.0.clone(), items, self)
+        stack.cut_block(self.get_heap()?.0, items, self)
     }
 }
 
@@ -627,11 +628,22 @@ impl Item for Word {
 
 type Tag = u8;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MemValue(Word, Tag);
+#[derive(Debug, Clone, Copy)]
+pub enum VmValue {
+    None,
+    Int(i32),
+    Bool(bool),
+    Block(Block<VmValue>),
+    Context(Block<VmValue>),
+    Path(Block<VmValue>),
+    String(Str),
+    Word(LenAddress),
+    SetWord(LenAddress),
+    GetWord(LenAddress),
+}
 
 #[allow(dead_code)]
-impl MemValue {
+impl VmValue {
     const TAG_NONE: u8 = 0;
     const TAG_INT: u8 = 1;
     const TAG_BOOL: u8 = 2;
@@ -644,53 +656,84 @@ impl MemValue {
     const TAG_GET_WORD: u8 = 9;
 
     pub fn none() -> Self {
-        Self(0, Self::TAG_NONE)
+        VmValue::None
     }
 
     pub fn string(value: Str) -> Self {
-        Self(value.0.0, Self::TAG_STRING)
+        VmValue::String(value)
     }
 
     pub fn int(value: i32) -> Self {
-        Self(value as Word, Self::TAG_INT)
+        VmValue::Int(value)
     }
 
-    pub fn block(value: Block<MemValue>) -> Self {
-        Self(value.0.0, Self::TAG_BLOCK)
+    pub fn block(value: Block<VmValue>) -> Self {
+        VmValue::Block(value)
     }
 
-    pub fn path(value: Block<MemValue>) -> Self {
-        Self(value.0.0, Self::TAG_PATH)
-    }
-
-    pub fn is_block(&self) -> bool {
-        self.1 == Self::TAG_BLOCK
+    pub fn path(value: Block<VmValue>) -> Self {
+        VmValue::Path(value)
     }
 }
 
-impl Item for MemValue {
+impl From<VmValue> for [Word; 2] {
+    fn from(value: VmValue) -> Self {
+        match value {
+            VmValue::None => [0, VmValue::TAG_NONE as Word],
+            VmValue::Int(value) => [value as Word, VmValue::TAG_INT as Word],
+            VmValue::Bool(value) => [value as Word, VmValue::TAG_BOOL as Word],
+            VmValue::Block(value) => [value.0.0, VmValue::TAG_BLOCK as Word],
+            VmValue::Context(value) => [value.0.0, VmValue::TAG_CONTEXT as Word],
+            VmValue::Path(value) => [value.0.0, VmValue::TAG_PATH as Word],
+            VmValue::String(value) => [value.0.0, VmValue::TAG_STRING as Word],
+            VmValue::Word(value) => [value.0, VmValue::TAG_WORD as Word],
+            VmValue::SetWord(value) => [value.0, VmValue::TAG_SET_WORD as Word],
+            VmValue::GetWord(value) => [value.0, VmValue::TAG_GET_WORD as Word],
+        }
+    }
+}
+
+impl TryFrom<[Word; 2]> for VmValue {
+    type Error = MemoryError;
+
+    fn try_from(value: [Word; 2]) -> Result<Self, Self::Error> {
+        let tag = value[1] as Tag;
+        match tag {
+            VmValue::TAG_NONE => Ok(VmValue::None),
+            VmValue::TAG_INT => Ok(VmValue::Int(value[0] as i32)),
+            VmValue::TAG_BOOL => Ok(VmValue::Bool(value[0] != 0)),
+            VmValue::TAG_BLOCK => Ok(VmValue::Block(Block::new(LenAddress(value[0])))),
+            VmValue::TAG_CONTEXT => Ok(VmValue::Context(Block::new(LenAddress(value[0])))),
+            VmValue::TAG_PATH => Ok(VmValue::Path(Block::new(LenAddress(value[0])))),
+            VmValue::TAG_STRING => Ok(VmValue::String(Str(LenAddress(value[0])))),
+            VmValue::TAG_WORD => Ok(VmValue::Word(LenAddress(value[0]))),
+            VmValue::TAG_SET_WORD => Ok(VmValue::SetWord(LenAddress(value[0]))),
+            VmValue::TAG_GET_WORD => Ok(VmValue::GetWord(LenAddress(value[0]))),
+            _ => Err(MemoryError::InvalidTag),
+        }
+    }
+}
+
+impl Item for VmValue {
     const SIZE: Offset = 8;
 
     fn load(data: &[u8]) -> Option<Self> {
-        let addr = data.get(..4)?;
-        let addr = u32::from_le_bytes(addr.try_into().ok()?);
-        let tag = data.get(4).copied()?;
-        Some(Self(addr, tag))
+        let addr = data
+            .get(0..4)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)?;
+        let tag = data
+            .get(4..8)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)?;
+        [addr, tag].try_into().ok()
     }
 
     fn store(self, data: &mut [u8]) -> Option<()> {
-        let MemValue(addr, tag) = self;
-        let addr_bytes = addr.to_le_bytes();
-        if data.len() < 5 {
-            None
-        } else {
-            // for i in 0..4 {
-            //     data[i] = addr_bytes[i];
-            // }
-            data[..4].copy_from_slice(&addr_bytes);
-            data[4] = tag;
-            Some(())
-        }
+        let [addr, tag] = self.into();
+        data[0..4].copy_from_slice(&addr.to_le_bytes());
+        data[4..8].copy_from_slice(&tag.to_le_bytes());
+        Some(())
     }
 }
 
@@ -703,25 +746,24 @@ impl Collector for Memory<'_> {
         let string = self
             .get_heap()?
             .alloc_string(self, string)
-            .map(MemValue::string)?;
+            .map(VmValue::string)?;
         self.get_parse_stack()?.push(string, self)
     }
 
     fn word(&mut self, kind: WordKind, word: &str) -> Option<()> {
-        let tag = match kind {
-            WordKind::Word => MemValue::TAG_WORD,
-            WordKind::SetWord => MemValue::TAG_SET_WORD,
-            WordKind::GetWord => MemValue::TAG_GET_WORD,
+        let symbol = self
+            .get_symbol_table()?
+            .get_or_insert_symbol(word, self.get_heap()?, self)?;
+        let value = match kind {
+            WordKind::Word => VmValue::Word(symbol),
+            WordKind::SetWord => VmValue::SetWord(symbol),
+            WordKind::GetWord => VmValue::GetWord(symbol),
         };
-        let symbol =
-            self.get_symbol_table()?
-                .get_or_insert_symbol(word, self.get_heap()?.clone(), self)?;
-        let value = MemValue(symbol.0, tag);
         self.get_parse_stack()?.push(value, self)
     }
 
     fn integer(&mut self, value: i32) -> Option<()> {
-        self.get_parse_stack()?.push(MemValue::int(value), self)
+        self.get_parse_stack()?.push(VmValue::int(value), self)
     }
 
     fn begin_block(&mut self) -> Option<()> {
@@ -729,7 +771,7 @@ impl Collector for Memory<'_> {
     }
 
     fn end_block(&mut self) -> Option<()> {
-        let block = self.end().map(MemValue::block)?;
+        let block = self.end().map(VmValue::Block)?;
         self.get_parse_stack()?.push(block, self)
     }
 
@@ -738,7 +780,7 @@ impl Collector for Memory<'_> {
     }
 
     fn end_path(&mut self) -> Option<()> {
-        let block = self.end().map(MemValue::path)?;
+        let block = self.end().map(VmValue::Path)?;
         self.get_parse_stack()?.push(block, self)
     }
 }
@@ -761,7 +803,7 @@ pub fn get(memory: &Memory, block: &Block<u8>, index: Offset) -> Option<u8> {
     block.get(index, memory)
 }
 
-pub fn parse_block<'a>(memory: &'a mut Memory<'a>, input: &str) -> Option<Block<MemValue>> {
+pub fn parse_block<'a>(memory: &'a mut Memory<'a>, input: &str) -> Option<Block<VmValue>> {
     crate::parse::Parser::parse(input, memory).ok()?;
     let parse = memory.get_parse_stack()?;
     let heap = memory.get_heap()?;
