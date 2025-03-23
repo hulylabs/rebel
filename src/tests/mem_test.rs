@@ -217,6 +217,77 @@ fn test_arena_alloc_stack() {
 }
 
 #[test]
+fn test_arena_alloc_block() {
+    let mut memory_vec = vec![0u32; MEMORY_SIZE];
+    let mut memory = new_test_memory(&mut memory_vec);
+    let heap = memory.get_heap().unwrap();
+
+    // Create a few MemValue items directly
+    let int1 = MemValue::int(42);
+    let int2 = MemValue::int(100);
+    let int3 = MemValue::int(-5);
+
+    // Allocate a string and create a string MemValue
+    let str_addr = heap.alloc_string(&mut memory, "hello").unwrap();
+    let str_val = MemValue::string(str_addr);
+
+    // Create an array of MemValue items
+    let items = [int1, int2, int3, str_val];
+
+    // Use the new alloc_block method to create a block with these items
+    let block = heap.alloc_block(&items, &mut memory);
+    assert!(block.is_some(), "Should be able to allocate a block");
+    let block = block.unwrap();
+
+    // Verify block length
+    assert_eq!(block.len(&memory), Some(4), "Block should contain 4 items");
+
+    // Verify each item in the block
+    assert_eq!(block.get(0, &memory), Some(int1), "First item should be 42");
+    assert_eq!(
+        block.get(1, &memory),
+        Some(int2),
+        "Second item should be 100"
+    );
+    assert_eq!(block.get(2, &memory), Some(int3), "Third item should be -5");
+    assert_eq!(
+        block.get(3, &memory),
+        Some(str_val),
+        "Fourth item should be the string"
+    );
+
+    // Demonstrate creating a block MemValue (e.g., for use in a higher-level block)
+    let block_value = MemValue::block(block.clone());
+
+    // Example of how you might use this in a nested structure:
+    // Create another block that contains the first block as an item
+    let items2 = [int1, block_value, int3];
+    let block2 = heap.alloc_block(&items2, &mut memory).unwrap();
+
+    // Verify the nested structure
+    assert_eq!(
+        block2.len(&memory),
+        Some(3),
+        "Outer block should have 3 items"
+    );
+    assert_eq!(
+        block2.get(0, &memory),
+        Some(int1),
+        "First item should be 42"
+    );
+    assert_eq!(
+        block2.get(1, &memory),
+        Some(block_value),
+        "Second item should be the block"
+    );
+    assert_eq!(
+        block2.get(2, &memory),
+        Some(int3),
+        "Third item should be -5"
+    );
+}
+
+#[test]
 fn test_arena_alloc_stack_edge_cases() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
     let mut memory = new_test_memory(&mut memory_vec);

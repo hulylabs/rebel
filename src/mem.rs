@@ -283,6 +283,7 @@ where
 }
 
 /// Block data structure for storing a sequence of items of type I
+#[derive(Debug, Clone)]
 pub struct Block<I>(LenAddress, PhantomData<I>);
 
 impl<I> Block<I>
@@ -358,6 +359,48 @@ impl Arena {
         let total_bytes = cap_items * I::SIZE;
         let cap_words = (total_bytes + 3) / 4; // Round up to nearest word
         self.0.alloc_cap(cap_words, memory).map(Stack::new)
+    }
+
+    /// Allocate a block containing the given items
+    ///
+    /// This method allows direct creation of blocks with any type of items that
+    /// implement the `Item` trait, without using the parse API.
+    ///
+    /// # Parameters
+    /// * `items` - The items to store in the block
+    /// * `memory` - The memory to allocate the block in
+    ///
+    /// # Returns
+    /// * `Some(Block<I>)` - A block containing the items if allocation succeeded
+    /// * `None` - If allocation failed (e.g., not enough memory)
+    pub fn alloc_block<I: Item + Copy>(
+        &self,
+        items: &[I],
+        memory: &mut Memory,
+    ) -> Option<Block<I>> {
+        // Calculate the total size in bytes
+        let total_size_bytes = I::SIZE * items.len() as Word;
+
+        // Reserve a block of the appropriate size
+        let block_addr = self.0.reserve_block(total_size_bytes, memory)?;
+
+        // Get the data area for writing
+        let data = block_addr.get_data_mut(memory)?;
+
+        // Write each item to the block
+        for (i, &item) in items.iter().enumerate() {
+            let start = (i as Word * I::SIZE) as usize;
+            let end = start + I::SIZE as usize;
+
+            if let Some(slot) = data.get_mut(start..end) {
+                item.store(slot)?;
+            } else {
+                return None; // Out of bounds
+            }
+        }
+
+        // Return a Block wrapper for the allocated memory
+        Some(Block::new(block_addr))
     }
 }
 
