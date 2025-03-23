@@ -29,9 +29,9 @@ pub enum MemoryError {
 }
 
 /// 32-bit word, the basic unit of memory allocation
-type Word = u32;
+pub type Word = u32;
 /// Memory offset, measured in words
-type Offset = Word;
+pub type Offset = Word;
 
 /// Trait for types that can be stored in and loaded from memory
 pub trait Item: Sized {
@@ -643,6 +643,10 @@ impl MemValue {
     const TAG_SET_WORD: u8 = 8;
     const TAG_GET_WORD: u8 = 9;
 
+    pub fn none() -> Self {
+        Self(0, Self::TAG_NONE)
+    }
+
     pub fn string(value: Str) -> Self {
         Self(value.0.0, Self::TAG_STRING)
     }
@@ -657,6 +661,10 @@ impl MemValue {
 
     pub fn path(value: Block<MemValue>) -> Self {
         Self(value.0.0, Self::TAG_PATH)
+    }
+
+    pub fn is_block(&self) -> bool {
+        self.1 == Self::TAG_BLOCK
     }
 }
 
