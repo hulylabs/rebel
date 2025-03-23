@@ -32,6 +32,8 @@ fn test_memory_init() {
     assert!(memory.get_parse_stack().is_some());
     assert!(memory.get_parse_base().is_some());
     assert!(memory.get_heap().is_some());
+
+    assert_eq!(memory.get_parse_stack().unwrap().len(&memory), Some(0));
 }
 
 #[test]
@@ -54,6 +56,20 @@ fn test_item_implementations() {
     assert!(value.store(&mut data).is_some());
     let loaded = MemValue::load(&data).unwrap();
     assert_eq!(loaded, value);
+}
+
+#[test]
+fn test_stack_operations_1() {
+    let mut memory_vec = vec![0u32; MEMORY_SIZE];
+    let mut memory = new_memory(&mut memory_vec);
+
+    let base = memory.get_parse_base().unwrap();
+    base.push(42424242, &mut memory).unwrap();
+    assert_eq!(base.len(&memory), Some(1));
+    assert_eq!(base.peek(&memory), Some(42424242));
+    assert_eq!(base.pop(&mut memory), Some(42424242));
+    assert_eq!(base.len(&memory), Some(0));
+    assert_eq!(base.pop(&mut memory), None);
 }
 
 #[test]
@@ -134,6 +150,14 @@ fn test_block_operations() {
     for &val in &values {
         stack.push(val, &mut memory).unwrap();
     }
+
+    println!("* after pushes stack {:?}", stack.peek(&memory).unwrap());
+    println!(
+        "* after pushes base {:?}",
+        memory.get_parse_base().unwrap().peek(&memory).unwrap()
+    );
+    println!("* after pushes 3 {:?}", stack.get(3, &memory).unwrap());
+
     let block = memory.end().unwrap();
 
     // Verify block length
