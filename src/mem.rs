@@ -167,6 +167,21 @@ impl CapAddress {
         }
     }
 
+    pub fn alloc_cap(&self, cap_words: Word, memory: &mut Memory) -> Option<CapAddress> {
+        let len_address = self.len_address();
+        let len = len_address.get_len(memory)?;
+        let aligned_len = (len + 3) & !3;
+        let cap_bytes = cap_words * 4;
+        let new_len = aligned_len + cap_bytes + 8; // 2 words for the cap and len fields
+        if new_len > cap_bytes {
+            None
+        } else {
+            let offset = aligned_len / 4;
+            len_address.set_len(new_len, memory)?;
+            memory.init_cap(len_address.data_address() + offset, cap_words)
+        }
+    }
+
     /// Get the length address associated with this capacity address
     pub fn len_address(&self) -> LenAddress {
         LenAddress(self.0 + 1)
@@ -310,6 +325,11 @@ impl Arena {
     /// Allocate a string in the arena
     pub fn alloc_string(&self, memory: &mut Memory, string: &str) -> Option<Str> {
         self.0.alloc_block(string.as_bytes(), memory).map(Str)
+    }
+
+    pub fn alloc_stack<I: Item>(&self, memory: &mut Memory, cap_items: Word) -> Option<Stack<I>> {
+        let cap_words = (cap_items * I::SIZE) / 4;
+        self.0.alloc_cap(cap_words, memory).map(Stack::new)
     }
 }
 
