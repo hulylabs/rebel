@@ -757,18 +757,47 @@ impl Item for MemValue {
     const SIZE: Offset = 5;
 
     fn load(data: &[u8]) -> Option<Self> {
-        let word = data
-            .get(0..4)
-            .and_then(|bytes| bytes.try_into().ok())
-            .map(u32::from_le_bytes)?;
-        let tag = data.get(4).copied()?;
-        Some(MemValue(word, tag))
+        if data.len() < Self::SIZE as usize {
+            None
+        } else {
+            let word = data[0..4].try_into().ok().map(u32::from_le_bytes)?;
+            let tag = data[4];
+            Some(MemValue(word, tag))
+        }
     }
 
     fn store(self, data: &mut [u8]) -> Option<()> {
-        let word = data.get_mut(0..4)?;
-        word.copy_from_slice(&self.0.to_le_bytes());
-        data.get_mut(4).map(|tag| *tag = self.1)
+        if data.len() < 5 {
+            None
+        } else {
+            data[0..4].copy_from_slice(&self.0.to_le_bytes());
+            data[4] = self.1;
+            Some(())
+        }
+    }
+}
+
+impl Item for MemValueAligned {
+    const SIZE: Offset = 8;
+
+    fn load(data: &[u8]) -> Option<Self> {
+        if data.len() < Self::SIZE as usize {
+            None
+        } else {
+            let word = data[0..4].try_into().ok().map(u32::from_le_bytes)?;
+            let tag = data[4..8].try_into().ok().map(u32::from_le_bytes)?;
+            Some(Self(word, tag))
+        }
+    }
+
+    fn store(self, data: &mut [u8]) -> Option<()> {
+        if data.len() < 8 {
+            None
+        } else {
+            data[0..4].copy_from_slice(&self.0.to_le_bytes());
+            data[4..8].copy_from_slice(&self.1.to_le_bytes());
+            Some(())
+        }
     }
 }
 
