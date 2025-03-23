@@ -122,7 +122,6 @@ impl CapAddress {
         let len_object = memory.get_mut(self.len_address().address(), cap_words + 1)?;
         let (len_ptr, data) = len_object.split_first_mut()?;
 
-        // let len_address = self.len_address();
         let len = *len_ptr;
         let new_len = len + size_bytes;
 
@@ -201,7 +200,7 @@ where
         self.0
             .len_address()
             .get_len(memory)
-            .and_then(|x| x.checked_div(I::SIZE))
+            .map(|len_bytes| len_bytes / I::SIZE)
     }
 
     /// Look at the top item without removing it
@@ -494,8 +493,9 @@ impl<'a> Memory<'a> {
 
     pub fn end(&mut self) -> Option<Block<MemValue>> {
         let offset = self.get_parse_base()?.pop(self)?;
-        self.get_parse_stack()?
-            .cut_block(self.get_heap()?.0.clone(), offset, self)
+        let stack = self.get_parse_stack()?;
+        let items = stack.len(self).and_then(|len| len.checked_sub(offset))?;
+        stack.cut_block(self.get_heap()?.0.clone(), items, self)
     }
 }
 
