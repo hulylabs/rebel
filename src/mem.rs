@@ -143,20 +143,17 @@ impl CapAddress {
     /// Reserve a block of the given size in bytes
     pub fn reserve_block(&self, data_len_bytes: Word, memory: &mut Memory) -> Option<LenAddress> {
         println!("reserve_block");
-        debug_assert!(data_len_bytes % 4 == 0);
-        let to_allocate = data_len_bytes + 4; // 4 bytes for the length field        
         let cap_words = self.get_cap(memory)?;
         let cap_bytes = cap_words * 4;
 
-        println!("to_allocate: {}", to_allocate);
-        println!("cap_words: {}", cap_words);
-
         let len_address = self.len_address();
         let len = len_address.get_len(memory)?;
-        let new_len = len + to_allocate;
+        let aligned_len = (len + 3) & !3;
+        let new_len = aligned_len + data_len_bytes + 4; // 4 bytes for the length field
+
         if new_len <= cap_bytes {
             len_address.set_len(new_len, memory)?;
-            let reserved = len_address.data_address() + (len / 4);
+            let reserved = len_address.data_address() + (aligned_len / 4);
             memory.init_block(reserved, data_len_bytes)
         } else {
             None
