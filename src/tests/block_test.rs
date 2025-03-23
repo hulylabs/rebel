@@ -1,20 +1,12 @@
 // Block-specific tests for the memory system
 
 use crate::mem::*;
-
-const MEMORY_SIZE: usize = 8192;
-const REGION_SIZE: u32 = 1024;
-
-// Create a test memory block with standard sizes
-fn setup_test_memory<'a>(memory: &'a mut [u32]) -> Memory<'a> {
-    Memory::init(memory, [REGION_SIZE, REGION_SIZE, REGION_SIZE, REGION_SIZE])
-        .expect("Failed to initialize memory")
-}
+use crate::tests::test_utils::*;
 
 #[test]
 fn test_block_creation_and_read() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = setup_test_memory(&mut memory_vec);
+    let mut memory = new_equal_region_memory(&mut memory_vec);
 
     // Create a block with 3 integers
     memory.begin().unwrap();
@@ -44,7 +36,7 @@ fn test_block_creation_and_read() {
 #[test]
 fn test_block_modification() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = setup_test_memory(&mut memory_vec);
+    let mut memory = new_equal_region_memory(&mut memory_vec);
 
     // Create a block with 2 integers
     memory.begin().unwrap();
@@ -77,7 +69,7 @@ fn test_block_modification() {
 #[test]
 fn test_multiple_blocks() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = setup_test_memory(&mut memory_vec);
+    let mut memory = new_equal_region_memory(&mut memory_vec);
 
     // Create first block with [1, 2]
     memory.begin().unwrap();
@@ -103,7 +95,7 @@ fn test_multiple_blocks() {
 #[test]
 fn test_empty_block() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = setup_test_memory(&mut memory_vec);
+    let mut memory = new_equal_region_memory(&mut memory_vec);
 
     // Create an empty block
     memory.begin().unwrap();
@@ -117,7 +109,7 @@ fn test_empty_block() {
 #[test]
 fn test_large_block() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = setup_test_memory(&mut memory_vec);
+    let mut memory = new_equal_region_memory(&mut memory_vec);
 
     // Create a larger block with 100 values
     memory.begin().unwrap();

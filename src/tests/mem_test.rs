@@ -1,31 +1,12 @@
-// Memory system tests
+// Memory system core tests - focuses on memory initialization, item serialization, and core operations
 
 use crate::mem::*;
-
-const SYMBOL_TABLE_SIZE: u32 = 1024;
-const PARSE_STACK_SIZE: u32 = 1024;
-const PARSE_BASE_SIZE: u32 = 256;
-const HEAP_SIZE: u32 = 4096;
-const MEMORY_SIZE: usize = 8192;
-
-// Helper function to create a new memory instance
-fn new_memory<'a>(memory: &'a mut [u32]) -> Memory<'a> {
-    Memory::init(
-        memory,
-        [
-            SYMBOL_TABLE_SIZE,
-            PARSE_STACK_SIZE,
-            PARSE_BASE_SIZE,
-            HEAP_SIZE,
-        ],
-    )
-    .expect("Failed to initialize memory")
-}
+use crate::tests::test_utils::*;
 
 #[test]
 fn test_memory_init() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let memory = new_memory(&mut memory_vec);
+    let memory = new_test_memory(&mut memory_vec);
 
     // Test that we can access the different regions
     assert!(memory.get_symbol_table().is_some());
@@ -59,36 +40,29 @@ fn test_item_implementations() {
 }
 
 #[test]
-fn test_stack_operations_1() {
+fn test_stack_operations() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = new_memory(&mut memory_vec);
+    let mut memory = new_test_memory(&mut memory_vec);
 
+    // Test parse_base stack (basic u32 operations)
     let base = memory.get_parse_base().unwrap();
     base.push(42424242, &mut memory).unwrap();
     assert_eq!(base.len(&memory), Some(1));
     assert_eq!(base.peek(&memory), Some(42424242));
     assert_eq!(base.pop(&mut memory), Some(42424242));
     assert_eq!(base.len(&memory), Some(0));
-    assert_eq!(base.pop(&mut memory), None);
-}
+    assert_eq!(base.pop(&mut memory), None); // Empty stack pop returns None
 
-#[test]
-fn test_stack_operations() {
-    let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = new_memory(&mut memory_vec);
-
-    // Get the parse stack
+    // Test parse_stack (MemValue operations)
     let stack = memory.get_parse_stack().unwrap();
 
     // Check initial state
     assert_eq!(stack.len(&memory), Some(0));
 
-    // Test push
+    // Test push and peek
     let value = MemValue::int(42);
     assert!(stack.push(value, &mut memory).is_some());
     assert_eq!(stack.len(&memory), Some(1));
-
-    // Test peek
     assert_eq!(stack.peek(&memory), Some(value));
 
     // Test pop
@@ -112,60 +86,9 @@ fn test_stack_operations() {
 }
 
 #[test]
-fn test_string_storage() {
-    let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = new_memory(&mut memory_vec);
-
-    // Get the heap
-    let heap = memory.get_heap().unwrap();
-
-    // Store a string
-    let test_str = "Hello, Rebel!";
-    let str_handle = heap.alloc_string(&mut memory, test_str).unwrap();
-
-    // Verify length
-    assert_eq!(str_handle.len(&memory), Some(test_str.len() as u32));
-
-    // Verify content
-    let bytes = str_handle.as_bytes(&memory).unwrap();
-    assert_eq!(bytes, test_str.as_bytes());
-}
-
-#[test]
-fn test_block_operations() {
-    let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = new_memory(&mut memory_vec);
-
-    // First, get the parse stack
-    let stack = memory.get_parse_stack().unwrap();
-
-    // Push some values to the stack
-    let values = [MemValue::int(10), MemValue::int(20), MemValue::int(30)];
-    for &val in &values {
-        stack.push(val, &mut memory).unwrap();
-    }
-
-    // Create a block
-    memory.begin().unwrap();
-    for &val in &values {
-        stack.push(val, &mut memory).unwrap();
-    }
-
-    let block = memory.end().unwrap();
-
-    // Verify block length
-    assert_eq!(block.len(&memory), Some(3));
-
-    // Verify block contents
-    for (i, &val) in values.iter().enumerate() {
-        assert_eq!(block.get(i as u32, &memory), Some(val));
-    }
-}
-
-#[test]
 fn test_symbol_table() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = new_memory(&mut memory_vec);
+    let mut memory = new_test_memory(&mut memory_vec);
 
     let symbol_table = memory.get_symbol_table().unwrap();
     let heap = memory.get_heap().unwrap();

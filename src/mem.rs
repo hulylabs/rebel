@@ -47,13 +47,13 @@ pub trait Item: Sized {
 
 fn u32_slice_to_u8_slice(slice: &[u32]) -> &[u8] {
     let ptr = slice.as_ptr() as *const u8;
-    let len = slice.len() * std::mem::size_of::<u32>();
+    let len = std::mem::size_of_val(slice);
     unsafe { std::slice::from_raw_parts(ptr, len) }
 }
 
 fn u32_slice_to_u8_slice_mut(slice: &mut [u32]) -> &mut [u8] {
     let ptr = slice.as_mut_ptr() as *mut u8;
-    let len = slice.len() * std::mem::size_of::<u32>();
+    let len = std::mem::size_of_val(slice);
     unsafe { std::slice::from_raw_parts_mut(ptr, len) }
 }
 
@@ -539,6 +539,7 @@ type Tag = u8;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MemValue(Word, Tag);
 
+#[allow(dead_code)]
 impl MemValue {
     const TAG_NONE: u8 = 0;
     const TAG_INT: u8 = 1;

@@ -1,19 +1,11 @@
 // String management tests for the memory system
 use crate::mem::*;
-
-const MEMORY_SIZE: usize = 8192;
-const REGION_SIZE: u32 = 1024;
-
-// Create a test memory block with standard sizes
-fn setup_test_memory<'a>(memory: &'a mut [u32]) -> Memory<'a> {
-    Memory::init(memory, [REGION_SIZE, REGION_SIZE, REGION_SIZE, REGION_SIZE])
-        .expect("Failed to initialize memory")
-}
+use crate::tests::test_utils::*;
 
 #[test]
 fn test_string_allocation_and_retrieval() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = setup_test_memory(&mut memory_vec);
+    let mut memory = new_equal_region_memory(&mut memory_vec);
 
     // Get the heap
     let heap = memory.get_heap().unwrap();
@@ -37,7 +29,7 @@ fn test_string_allocation_and_retrieval() {
 #[test]
 fn test_parse_and_retrieve_block() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = setup_test_memory(&mut memory_vec);
+    let mut memory = new_equal_region_memory(&mut memory_vec);
 
     // Create a block directly
     let stack = memory.get_parse_stack().unwrap();
@@ -69,7 +61,7 @@ fn test_parse_and_retrieve_block() {
 #[test]
 fn test_multiple_string_allocations() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = setup_test_memory(&mut memory_vec);
+    let mut memory = new_equal_region_memory(&mut memory_vec);
     let heap = memory.get_heap().unwrap();
 
     // Allocate multiple strings
@@ -91,7 +83,7 @@ fn test_multiple_string_allocations() {
 #[test]
 fn test_memory_system_integration() {
     let mut memory_vec = vec![0u32; MEMORY_SIZE];
-    let mut memory = setup_test_memory(&mut memory_vec);
+    let mut memory = new_equal_region_memory(&mut memory_vec);
 
     // Create a string
     let heap = memory.get_heap().unwrap();
