@@ -1,6 +1,6 @@
 # Rebel Memory System Documentation
 
-This document provides a comprehensive overview of the Rebel memory system, including its architecture, components, and key operations.
+This document provides a comprehensive overview of the Rebel memory system, including its architecture, components, and key operations. The memory system is now fully operational with all tests passing.
 
 ## 1. Overview
 
@@ -191,7 +191,31 @@ The memory system is thoroughly tested through unit tests covering:
 
 Tests ensure correct behavior and memory safety across all operations.
 
-## 8. Troubleshooting
+## 8. Best Practices
+
+When working with the memory system, follow these best practices:
+
+1. **Memory Access**
+   - Always check the return value of memory operations (they return `Option<T>`)
+   - Use high-level abstractions (Stack, Block) when possible instead of direct memory access
+   - Keep track of capacity constraints to prevent allocation failures
+
+2. **API Usage**
+   - Prefer using domain-specific methods over generic memory access
+   - Use the appropriate address type (LenAddress vs. CapAddress) for each use case
+   - Release memory resources when they're no longer needed
+
+3. **Testing**
+   - Test memory operations with edge cases (empty, maximum size)
+   - Verify both successful and failure conditions
+   - Test interactions between different memory regions
+
+4. **Documentation**
+   - Document memory requirements for functions that use the memory system
+   - Clearly comment any unsafe operations or assumptions
+   - Document lifetime requirements for borrowed memory references
+
+## 9. Troubleshooting
 
 Common issues that may arise and their solutions:
 
@@ -199,21 +223,27 @@ Common issues that may arise and their solutions:
    - Check capacity calculations
    - Verify word/byte conversion
    - Ensure proper alignment
+   - Confirm all regions are properly initialized with sufficient size
 
 2. **Invalid address errors**
-   - Confirm address calculation
+   - Confirm address calculation is using the right offset
    - Check if memory has been properly initialized
-   - Verify pointer arithmetic
+   - Verify pointer arithmetic, especially when converting between bytes and words
+   - Ensure method visibility is correct for test access
 
 3. **Stack corruption**
    - Review push/pop balance
    - Check length updates
    - Verify data copying operations
+   - Validate memory state before and after operations
 
-## 9. Future Enhancements
+## 10. Future Enhancements
 
 Potential areas for improvement:
 - Garbage collection for automatic memory management
 - Reference counting for shared resources
 - Memory compaction to reduce fragmentation
 - Region-based allocation for temporary computations
+- More sophisticated error handling with specific error types
+- Memory usage statistics and monitoring
+- Optimized memory layout for specific operation patterns

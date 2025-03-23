@@ -6,18 +6,20 @@
    - Address calculation methods
    - Memory access methods
    - Block and capacity management
+   - Helper methods used by tests
 
-2. **Test Behavior**: The memory tests are sensitive to the exact memory layout and management. When tests fail, we should look for:
-   - Visibility issues (private methods being called in tests)
-   - Memory layout differences
-   - Initialization issues
-   - Changes to address calculations
+2. **Test Behavior**: The memory tests are sensitive to the exact memory layout and management. Key patterns to maintain:
+   - All tests are now passing with the current implementation
+   - Changes to memory layout or address calculations require corresponding test updates
+   - Memory initialization must be consistent across all tests
+   - Capacity calculations must account for both word and byte measurements
 
 3. **API Design Pattern**: The memory system uses the following pattern:
    - Core methods for memory access are defined in `Memory`
    - Specialized abstractions are built on top (LenAddress, CapAddress)
    - Data structures (Stack, Block, etc.) use those abstractions
    - Helper functions expose common operations
+   - All public API methods handle errors gracefully through Option/Result
 
 4. **Implementation Notes**:
    - Bounds checking is critical for all memory operations
@@ -32,6 +34,8 @@
    - Focus on what the method does, not how
    - Indicate any prerequisites or assumptions
    - Document any safety considerations or unsafe operations
+   - Include examples for complex operations
+   - Document error conditions and when methods return None/error
 
 2. **Documentation Balance**:
    - Keep documentation concise but complete
@@ -50,6 +54,14 @@
    - Make sure to update documentation alongside code
    - Keep the memory bank updated with new knowledge
    - Fix test failures before moving on to new features
+   - Prioritize completeness of documentation for existing features over new development
+
+2. **API Refinement Approach**:
+   - Focus on clarity and usability of public interfaces
+   - Create higher-level abstractions where appropriate 
+   - Document typical usage patterns
+   - Ensure consistent error handling across similar operations
+   - Reduce redundancy in the API where possible
 
 2. **Code Organization**:
    - Group related functions together
@@ -57,4 +69,18 @@
    - Expose a clean, well-documented public API
    - Use consistent naming conventions
 
-These guidelines and notes should help maintain consistency and quality as we continue to develop the Rebel interpreter.
+## Next Phase Considerations
+
+1. **Virtual Machine Integration**:
+   - The memory system will be the foundation for the VM
+   - Consider performance optimizations for common operations
+   - Enhance the memory system API to support VM operations
+   - Plan for garbage collection or memory reclamation
+
+2. **Documentation Completeness**:
+   - Comprehensive documentation is essential before moving to VM development
+   - Focus on memory-system.md as the primary reference documentation
+   - Include diagrams where helpful for understanding memory layout
+   - Document all public methods with consistent style
+
+These guidelines and notes should help maintain consistency and quality as we continue to develop the Rebel interpreter. With all memory tests now passing, we're well-positioned to complete documentation and move toward VM implementation.
