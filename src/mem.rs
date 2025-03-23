@@ -223,6 +223,10 @@ where
         Self(addr, PhantomData)
     }
 
+    pub fn address(&self) -> Offset {
+        self.0.address()
+    }
+
     /// Get the number of items in the stack
     pub fn len(&self, memory: &Memory) -> Option<Word> {
         self.0
@@ -290,6 +294,10 @@ impl<I> Block<I>
 where
     I: Item,
 {
+    pub fn address(&self) -> Offset {
+        self.0.address()
+    }
+
     /// Create a new block at the given length address
     pub fn new(addr: LenAddress) -> Self {
         Self(addr, PhantomData)
@@ -629,10 +637,10 @@ impl Item for Word {
 type Tag = u8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MemValueAligned(Word, Word);
+pub struct MemValueCompressed(Word, Tag);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MemValue(Word, Tag);
+pub struct MemValue(Word, Word);
 
 impl MemValue {
     const TAG_NONE: u8 = 0;
@@ -647,43 +655,53 @@ impl MemValue {
     const TAG_GET_WORD: u8 = 9;
 
     pub fn none() -> Self {
-        MemValue(0, Self::TAG_NONE)
+        MemValue(0, Self::TAG_NONE as Word)
     }
 
     pub fn string(value: Str) -> Self {
-        MemValue(value.0.0, Self::TAG_STRING)
+        MemValue(value.0.0, Self::TAG_STRING as Word)
     }
 
     pub fn bool(value: bool) -> Self {
-        MemValue(value as Word, Self::TAG_BOOL)
+        MemValue(value as Word, Self::TAG_BOOL as Word)
     }
 
     pub fn int(value: i32) -> Self {
-        MemValue(value as Word, Self::TAG_INT)
+        MemValue(value as Word, Self::TAG_INT as Word)
     }
 
     pub fn block(value: Block<VmValue>) -> Self {
-        MemValue(value.0.0, Self::TAG_BLOCK)
+        MemValue(value.0.0, Self::TAG_BLOCK as Word)
     }
 
     pub fn context(value: Block<VmValue>) -> Self {
-        MemValue(value.0.0, Self::TAG_CONTEXT)
+        MemValue(value.0.0, Self::TAG_CONTEXT as Word)
     }
 
     pub fn path(value: Block<VmValue>) -> Self {
-        MemValue(value.0.0, Self::TAG_PATH)
+        MemValue(value.0.0, Self::TAG_PATH as Word)
     }
 
     pub fn word(value: LenAddress) -> Self {
-        MemValue(value.0, Self::TAG_WORD)
+        MemValue(value.0, Self::TAG_WORD as Word)
     }
 
     pub fn set_word(value: LenAddress) -> Self {
-        MemValue(value.0, Self::TAG_SET_WORD)
+        MemValue(value.0, Self::TAG_SET_WORD as Word)
     }
 
     pub fn get_word(value: LenAddress) -> Self {
-        MemValue(value.0, Self::TAG_GET_WORD)
+        MemValue(value.0, Self::TAG_GET_WORD as Word)
+    }
+
+    //
+
+    pub fn as_block<I: Item>(self) -> Option<Block<I>> {
+        if self.1 as Tag == Self::TAG_BLOCK {
+            Some(Block::new(LenAddress(self.0)))
+        } else {
+            None
+        }
     }
 }
 
@@ -739,22 +757,20 @@ impl TryFrom<MemValue> for VmValue {
     }
 }
 
-impl From<MemValue> for MemValueAligned {
+impl From<MemValue> for MemValueCompressed {
     fn from(value: MemValue) -> Self {
-        MemValueAligned(value.0, value.1 as Word)
+        Self(value.0, value.1 as Tag)
     }
 }
 
-impl TryFrom<MemValueAligned> for MemValue {
-    type Error = MemoryError;
-
-    fn try_from(value: MemValueAligned) -> Result<Self, Self::Error> {
-        Ok(MemValue(value.0, value.1 as Tag))
+impl From<MemValueCompressed> for MemValue {
+    fn from(value: MemValueCompressed) -> Self {
+        Self(value.0, value.1 as Word)
     }
 }
 
-impl Item for MemValue {
-    const SIZE: Offset = 5;
+impl Item for MemValueCompressed {
+    const SIZE: Offset = 8;
 
     fn load(data: &[u8]) -> Option<Self> {
         if data.len() < Self::SIZE as usize {
@@ -762,7 +778,7 @@ impl Item for MemValue {
         } else {
             let word = data[0..4].try_into().ok().map(u32::from_le_bytes)?;
             let tag = data[4];
-            Some(MemValue(word, tag))
+            Some(Self(word, tag))
         }
     }
 
@@ -777,7 +793,7 @@ impl Item for MemValue {
     }
 }
 
-impl Item for MemValueAligned {
+impl Item for MemValue {
     const SIZE: Offset = 8;
 
     fn load(data: &[u8]) -> Option<Self> {
@@ -802,7 +818,7 @@ impl Item for MemValueAligned {
 }
 
 impl Item for VmValue {
-    const SIZE: Offset = 5;
+    const SIZE: Offset = MemValue::SIZE;
 
     fn load(data: &[u8]) -> Option<Self> {
         MemValue::load(data)?.try_into().ok()
