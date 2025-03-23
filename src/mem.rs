@@ -628,6 +628,9 @@ impl Item for Word {
 
 type Tag = u8;
 
+struct MemValueAligned(Word, Word);
+struct MemValue(Word, Tag);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VmValue {
     None,
@@ -676,64 +679,86 @@ impl VmValue {
     }
 }
 
-impl From<VmValue> for [Word; 2] {
+impl From<VmValue> for MemValue {
     fn from(value: VmValue) -> Self {
         match value {
-            VmValue::None => [0, VmValue::TAG_NONE as Word],
-            VmValue::Int(value) => [value as Word, VmValue::TAG_INT as Word],
-            VmValue::Bool(value) => [value as Word, VmValue::TAG_BOOL as Word],
-            VmValue::Block(value) => [value.0.0, VmValue::TAG_BLOCK as Word],
-            VmValue::Context(value) => [value.0.0, VmValue::TAG_CONTEXT as Word],
-            VmValue::Path(value) => [value.0.0, VmValue::TAG_PATH as Word],
-            VmValue::String(value) => [value.0.0, VmValue::TAG_STRING as Word],
-            VmValue::Word(value) => [value.0, VmValue::TAG_WORD as Word],
-            VmValue::SetWord(value) => [value.0, VmValue::TAG_SET_WORD as Word],
-            VmValue::GetWord(value) => [value.0, VmValue::TAG_GET_WORD as Word],
+            VmValue::None => MemValue(0, VmValue::TAG_NONE),
+            VmValue::Int(value) => MemValue(value as Word, VmValue::TAG_INT),
+            VmValue::Bool(value) => MemValue(value as Word, VmValue::TAG_BOOL),
+            VmValue::Block(value) => MemValue(value.0.0, VmValue::TAG_BLOCK),
+            VmValue::Context(value) => MemValue(value.0.0, VmValue::TAG_CONTEXT),
+            VmValue::Path(value) => MemValue(value.0.0, VmValue::TAG_PATH),
+            VmValue::String(value) => MemValue(value.0.0, VmValue::TAG_STRING),
+            VmValue::Word(value) => MemValue(value.0, VmValue::TAG_WORD),
+            VmValue::SetWord(value) => MemValue(value.0, VmValue::TAG_SET_WORD),
+            VmValue::GetWord(value) => MemValue(value.0, VmValue::TAG_GET_WORD),
         }
     }
 }
 
-impl TryFrom<[Word; 2]> for VmValue {
+impl TryFrom<MemValue> for VmValue {
     type Error = MemoryError;
 
-    fn try_from(value: [Word; 2]) -> Result<Self, Self::Error> {
-        let tag = value[1] as Tag;
+    fn try_from(value: MemValue) -> Result<Self, Self::Error> {
+        let tag = value.1 as Tag;
         match tag {
             VmValue::TAG_NONE => Ok(VmValue::None),
-            VmValue::TAG_INT => Ok(VmValue::Int(value[0] as i32)),
-            VmValue::TAG_BOOL => Ok(VmValue::Bool(value[0] != 0)),
-            VmValue::TAG_BLOCK => Ok(VmValue::Block(Block::new(LenAddress(value[0])))),
-            VmValue::TAG_CONTEXT => Ok(VmValue::Context(Block::new(LenAddress(value[0])))),
-            VmValue::TAG_PATH => Ok(VmValue::Path(Block::new(LenAddress(value[0])))),
-            VmValue::TAG_STRING => Ok(VmValue::String(Str(LenAddress(value[0])))),
-            VmValue::TAG_WORD => Ok(VmValue::Word(LenAddress(value[0]))),
-            VmValue::TAG_SET_WORD => Ok(VmValue::SetWord(LenAddress(value[0]))),
-            VmValue::TAG_GET_WORD => Ok(VmValue::GetWord(LenAddress(value[0]))),
+            VmValue::TAG_INT => Ok(VmValue::Int(value.0 as i32)),
+            VmValue::TAG_BOOL => Ok(VmValue::Bool(value.0 != 0)),
+            VmValue::TAG_BLOCK => Ok(VmValue::Block(Block::new(LenAddress(value.0)))),
+            VmValue::TAG_CONTEXT => Ok(VmValue::Context(Block::new(LenAddress(value.0)))),
+            VmValue::TAG_PATH => Ok(VmValue::Path(Block::new(LenAddress(value.0)))),
+            VmValue::TAG_STRING => Ok(VmValue::String(Str(LenAddress(value.0)))),
+            VmValue::TAG_WORD => Ok(VmValue::Word(LenAddress(value.0))),
+            VmValue::TAG_SET_WORD => Ok(VmValue::SetWord(LenAddress(value.0))),
+            VmValue::TAG_GET_WORD => Ok(VmValue::GetWord(LenAddress(value.0))),
             _ => Err(MemoryError::InvalidTag),
         }
     }
 }
 
-impl Item for VmValue {
-    const SIZE: Offset = 8;
+impl From<MemValue> for MemValueAligned {
+    fn from(value: MemValue) -> Self {
+        MemValueAligned(value.0, value.1 as Word)
+    }
+}
+
+impl TryFrom<MemValueAligned> for MemValue {
+    type Error = MemoryError;
+
+    fn try_from(value: MemValueAligned) -> Result<Self, Self::Error> {
+        Ok(MemValue(value.0, value.1 as Tag))
+    }
+}
+
+impl Item for MemValue {
+    const SIZE: Offset = 5;
 
     fn load(data: &[u8]) -> Option<Self> {
-        let addr = data
+        let word = data
             .get(0..4)
             .and_then(|bytes| bytes.try_into().ok())
             .map(u32::from_le_bytes)?;
-        let tag = data
-            .get(4..8)
-            .and_then(|bytes| bytes.try_into().ok())
-            .map(u32::from_le_bytes)?;
-        [addr, tag].try_into().ok()
+        let tag = data.get(4).copied()?;
+        Some(MemValue(word, tag))
     }
 
     fn store(self, data: &mut [u8]) -> Option<()> {
-        let [addr, tag] = self.into();
-        data[0..4].copy_from_slice(&addr.to_le_bytes());
-        data[4..8].copy_from_slice(&tag.to_le_bytes());
-        Some(())
+        let word = data.get_mut(0..4)?;
+        word.copy_from_slice(&self.0.to_le_bytes());
+        data.get_mut(4).map(|tag| *tag = self.1)
+    }
+}
+
+impl Item for VmValue {
+    const SIZE: Offset = 5;
+
+    fn load(data: &[u8]) -> Option<Self> {
+        MemValue::load(data)?.try_into().ok()
+    }
+
+    fn store(self, data: &mut [u8]) -> Option<()> {
+        MemValue::from(self).store(data)
     }
 }
 
