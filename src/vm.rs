@@ -1,6 +1,6 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use crate::mem::{Block, Memory, Offset, VmValue, Word};
+use crate::mem::{Block, Memory, Offset, VmValue};
 
 pub struct Vm<'a> {
     memory: &'a mut Memory<'a>,
@@ -13,7 +13,7 @@ impl<'a> Vm<'a> {
 }
 // pub struct Process<'a> {
 //     vm: &'a mut Vm<'a>,
-//     block: Block<MemValue>,
+//     block: Block<VmValue>,
 //     ip: Word,
 // }
 
@@ -32,7 +32,7 @@ impl Process {
         ))
     }
 
-    pub fn get_block(&self, memory: &Memory) -> Option<Block<VmValue>> {
+    pub fn get_block(&self, _memory: &Memory) -> Option<Block<VmValue>> {
         None
     }
 }

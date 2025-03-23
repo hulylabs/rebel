@@ -31,11 +31,11 @@ fn test_item_implementations() {
     assert!(value.store(&mut data).is_some());
     assert_eq!(u32::load(&data), Some(0x12345678));
 
-    // Test MemValue implementation
+    // Test VmValue implementation
     let mut data = [0u8; 8];
-    let value = MemValue::int(42);
+    let value = VmValue::int(42);
     assert!(value.store(&mut data).is_some());
-    let loaded = MemValue::load(&data).unwrap();
+    let loaded = VmValue::load(&data).unwrap();
     assert_eq!(loaded, value);
 }
 
@@ -53,14 +53,14 @@ fn test_stack_operations() {
     assert_eq!(base.len(&memory), Some(0));
     assert_eq!(base.pop(&mut memory), None); // Empty stack pop returns None
 
-    // Test parse_stack (MemValue operations)
+    // Test parse_stack (VmValue operations)
     let stack = memory.get_parse_stack().unwrap();
 
     // Check initial state
     assert_eq!(stack.len(&memory), Some(0));
 
     // Test push and peek
-    let value = MemValue::int(42);
+    let value = VmValue::int(42);
     assert!(stack.push(value, &mut memory).is_some());
     assert_eq!(stack.len(&memory), Some(1));
     assert_eq!(stack.peek(&memory), Some(value));
@@ -70,7 +70,7 @@ fn test_stack_operations() {
     assert_eq!(stack.len(&memory), Some(0));
 
     // Test pushing multiple values
-    let values = [MemValue::int(1), MemValue::int(2), MemValue::int(3)];
+    let values = [VmValue::int(1), VmValue::int(2), VmValue::int(3)];
     for &val in &values {
         assert!(stack.push(val, &mut memory).is_some());
     }
@@ -183,22 +183,22 @@ fn test_arena_alloc_stack() {
         );
     }
 
-    // Test 3: Stack with MemValue items
-    let mem_stack = heap.alloc_stack::<MemValue>(&mut memory, 5);
+    // Test 3: Stack with VmValue items
+    let mem_stack = heap.alloc_stack::<VmValue>(&mut memory, 5);
     assert!(
         mem_stack.is_some(),
-        "Should be able to allocate a MemValue stack"
+        "Should be able to allocate a VmValue stack"
     );
     let mem_stack = mem_stack.unwrap();
     assert_eq!(mem_stack.len(&memory), Some(0));
 
-    // Push some MemValue items
-    let values = [MemValue::int(10), MemValue::int(20), MemValue::int(30)];
+    // Push some VmValue items
+    let values = [VmValue::int(10), VmValue::int(20), VmValue::int(30)];
 
     for (idx, &val) in values.iter().enumerate() {
         assert!(
             mem_stack.push(val, &mut memory).is_some(),
-            "Should be able to push MemValue at index {}",
+            "Should be able to push VmValue at index {}",
             idx
         );
     }
@@ -210,7 +210,7 @@ fn test_arena_alloc_stack() {
         assert_eq!(
             mem_stack.pop(&mut memory),
             Some(val),
-            "Should be able to pop MemValue at index {}",
+            "Should be able to pop VmValue at index {}",
             idx
         );
     }
@@ -222,16 +222,16 @@ fn test_arena_alloc_block() {
     let mut memory = new_test_memory(&mut memory_vec);
     let heap = memory.get_heap().unwrap();
 
-    // Create a few MemValue items directly
-    let int1 = MemValue::int(42);
-    let int2 = MemValue::int(100);
-    let int3 = MemValue::int(-5);
+    // Create a few VmValue items directly
+    let int1 = VmValue::int(42);
+    let int2 = VmValue::int(100);
+    let int3 = VmValue::int(-5);
 
-    // Allocate a string and create a string MemValue
+    // Allocate a string and create a string VmValue
     let str_addr = heap.alloc_string(&mut memory, "hello").unwrap();
-    let str_val = MemValue::string(str_addr);
+    let str_val = VmValue::string(str_addr);
 
-    // Create an array of MemValue items
+    // Create an array of VmValue items
     let items = [int1, int2, int3, str_val];
 
     // Use the new alloc_block method to create a block with these items
@@ -256,8 +256,8 @@ fn test_arena_alloc_block() {
         "Fourth item should be the string"
     );
 
-    // Demonstrate creating a block MemValue (e.g., for use in a higher-level block)
-    let block_value = MemValue::block(block.clone());
+    // Demonstrate creating a block VmValue (e.g., for use in a higher-level block)
+    let block_value = VmValue::block(block.clone());
 
     // Example of how you might use this in a nested structure:
     // Create another block that contains the first block as an item

@@ -36,9 +36,9 @@ fn test_parse_and_retrieve_block() {
     memory.begin().unwrap();
 
     // Push some values to the stack
-    stack.push(MemValue::int(10), &mut memory).unwrap();
-    stack.push(MemValue::int(20), &mut memory).unwrap();
-    stack.push(MemValue::int(30), &mut memory).unwrap();
+    stack.push(VmValue::int(10), &mut memory).unwrap();
+    stack.push(VmValue::int(20), &mut memory).unwrap();
+    stack.push(VmValue::int(30), &mut memory).unwrap();
 
     // Verify stack length
     assert_eq!(stack.len(&memory), Some(3));
@@ -50,9 +50,9 @@ fn test_parse_and_retrieve_block() {
     assert_eq!(block.len(&memory), Some(3));
 
     // Verify block content by accessing individual elements
-    assert_eq!(block.get(0, &memory), Some(MemValue::int(10)));
-    assert_eq!(block.get(1, &memory), Some(MemValue::int(20)));
-    assert_eq!(block.get(2, &memory), Some(MemValue::int(30)));
+    assert_eq!(block.get(0, &memory), Some(VmValue::int(10)));
+    assert_eq!(block.get(1, &memory), Some(VmValue::int(20)));
+    assert_eq!(block.get(2, &memory), Some(VmValue::int(30)));
 
     // Verify out-of-bounds access returns None
     assert_eq!(block.get(3, &memory), None);
@@ -93,15 +93,15 @@ fn test_memory_system_integration() {
     // Create a block with integer values
     memory.begin().unwrap();
     let stack = memory.get_parse_stack().unwrap();
-    stack.push(MemValue::int(42), &mut memory).unwrap();
+    stack.push(VmValue::int(42), &mut memory).unwrap();
     stack
-        .push(MemValue::string(str_handle), &mut memory)
+        .push(VmValue::string(str_handle), &mut memory)
         .unwrap();
 
     let block = memory.end().unwrap();
 
     // Verify we can access the integer
-    assert_eq!(block.get(0, &memory), Some(MemValue::int(42)));
+    assert_eq!(block.get(0, &memory), Some(VmValue::int(42)));
 
     // Verify we can access the second element (which should be the string)
     if block.get(1, &memory).is_none() {

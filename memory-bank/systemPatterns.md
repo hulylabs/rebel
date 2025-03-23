@@ -33,10 +33,11 @@ Memory is organized into distinct regions:
 
 ### Value Representation
 
-Values in memory use a tagged representation (`MemValue`):
-- 32-bit word for data (typically an address or immediate value)
-- 8-bit tag to indicate type
-- Support for various types (int, bool, string, block, etc.)
+Values in memory use an enum representation (`VmValue`):
+- Enum variants for different value types (None, Int, Bool, String, etc.)
+- Support for composite types (Block, Context, Path)
+- Symbol representation (Word, SetWord, GetWord)
+- Serialized to memory as [data: u32, tag: u32] pairs
 
 ### Key Patterns
 

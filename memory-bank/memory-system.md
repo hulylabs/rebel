@@ -36,11 +36,13 @@ These address types enable efficient memory organization and access patterns.
 
 ## 3. Core Components
 
-### 3.1 Memory Values (MemValue)
+### 3.1 Memory Values (VmValue)
 
-The `MemValue` is the fundamental value type in the Rebel system. It consists of:
-- A 32-bit word (address or immediate value)
-- An 8-bit tag that determines the value's type
+The `VmValue` is the fundamental value type in the Rebel system. It is an enum with variants for different types:
+- None, Int, Bool for primitive values
+- Block, Context, Path for composite types
+- String for text data
+- Word, SetWord, GetWord for symbols/identifiers
 
 Tags defined in the system:
 - `TAG_NONE`: Represents no value/null (0)

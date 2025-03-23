@@ -58,7 +58,7 @@ fn u32_slice_to_u8_slice_mut(slice: &mut [u32]) -> &mut [u8] {
 }
 
 /// Address pointing to a length-prefixed block of memory
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LenAddress(pub Offset);
 
 impl LenAddress {
@@ -283,7 +283,7 @@ where
 }
 
 /// Block data structure for storing a sequence of items of type I
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Block<I>(LenAddress, PhantomData<I>);
 
 impl<I> Block<I>
@@ -317,7 +317,7 @@ where
 }
 
 /// String data structure for storing UTF-8 encoded text
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Str(LenAddress);
 
 impl Str {
@@ -628,7 +628,7 @@ impl Item for Word {
 
 type Tag = u8;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VmValue {
     None,
     Int(i32),

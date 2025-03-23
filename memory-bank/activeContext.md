@@ -2,48 +2,43 @@
 
 ## Current Focus
 
-We are currently strengthening the memory management system for the Rebel interpreter. This involves:
+We are currently enhancing the memory management system for the Rebel interpreter. This involves:
 
-1. Ensuring comprehensive documentation of the memory system
-2. Validating all critical operations with tests
-3. Refining the API for clarity and usability
-4. Improving test organization and eliminating duplication
+1. Completing the transition from tuple-based `MemValue` to enum-based `VmValue`
+2. Ensuring all tests pass with the new value representation
+3. Updating documentation to reflect the new enum-based approach
+4. Verifying proper implementation for equality comparisons and pattern matching
 
 ## Recent Work
 
-- Implemented the `alloc_stack` method in Arena for dynamic stack allocation
-- Added comprehensive tests for stack allocation, including edge cases
-- Fixed memory addressing and allocation issues to ensure proper memory safety
-- Improved documentation for the memory system, especially stack operations
-- Fixed visibility issues with memory operations
-- Successfully resolved all memory test failures 
-- Reorganized and consolidated test code to remove duplication
-- Created a shared test utilities module for common test functions
-- Refined the focus of test files to improve clarity and maintainability
+- Replaced tuple-based `MemValue` with enum-based `VmValue` for better type safety
+- Updated the implementation of equality comparison for `VmValue` with PartialEq/Eq traits
+- Ensured proper serialization/deserialization of `VmValue` to/from memory
+- Updated all test files to use the new `VmValue` enum
+- Updated documentation in both code and memory bank files
+- Verified that all tests pass with the new value representation
 
 ## Completed Issues
 
-We've successfully fixed all the test failures in our memory system and improved the test organization. Our improvements include:
+We've successfully transitioned from the tuple-based `MemValue` to the enum-based `VmValue` approach:
 
-1. All memory tests are now passing successfully
-2. Created a shared test utilities module (`test_utils.rs`) for common test functionality
-3. Specialized test files now have clear responsibilities:
-   - `mem_test.rs`: Core memory operations, item serialization, memory initialization
-   - `string_test.rs`: String allocation and manipulation
-   - `block_test.rs`: Block creation, retrieval, and manipulation
-4. Eliminated duplicated test setup code and redundant test cases
+1. All tests now use and validate the `VmValue` enum correctly
+2. Implemented proper equality comparison for `VmValue` with PartialEq/Eq traits
+3. Updated serialization/deserialization between `VmValue` and memory
+4. Made all related documentation consistent with the new approach
+5. Fixed any issues that arose during the transition
 
 ## Next Steps
 
-1. Complete comprehensive documentation on the memory system
-2. Ensure all critical operations have proper tests
-3. Refine the API for clarity and usability
-4. Prepare for the next phase of development (minimal working VM)
+1. Continue building the VM implementation using the new `VmValue` enum
+2. Implement proper error handling for VM operations
+3. Develop basic execution capabilities for the VM
+4. Add context/environment support for variable binding
 
 ## Design Considerations
 
-- Memory management needs to be particularly efficient to support the interpreter's operations
-- The system must handle different types of values: strings, integers, blocks, etc.
-- We're using a tagged value representation (MemValue) to handle the different types
-- Memory addresses (LenAddress, CapAddress) provide abstraction over raw offsets
-- Documentation must be clear and comprehensive to support future development
+- The enum-based `VmValue` provides stronger type safety than the previous tuple approach
+- The implementation ensures proper memory safety through Rust's type system
+- The serialization/deserialization of `VmValue` to/from memory is now more robust
+- The enum approach makes pattern matching more natural and safer
+- Documentation must clearly explain the value representation for future developers
