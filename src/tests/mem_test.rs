@@ -151,13 +151,6 @@ fn test_block_operations() {
         stack.push(val, &mut memory).unwrap();
     }
 
-    println!("* after pushes stack {:?}", stack.peek(&memory).unwrap());
-    println!(
-        "* after pushes base {:?}",
-        memory.get_parse_base().unwrap().peek(&memory).unwrap()
-    );
-    println!("* after pushes 3 {:?}", stack.get(3, &memory).unwrap());
-
     let block = memory.end().unwrap();
 
     // Verify block length

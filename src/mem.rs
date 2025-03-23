@@ -86,14 +86,10 @@ impl LenAddress {
     pub fn get_data<'a>(&self, memory: &'a Memory) -> Option<&'a [u8]> {
         let len = self.get_len(memory)?; // in bytes
         let words = (len + 3) / 4; // Round up to word boundary
-        println!("len (words): {}", words);
         let data = memory.get(self.data_address(), words)?;
-        println!("LenAddress::get_data");
-        println!("data: {:?}", data);
         // Safety: We're reinterpreting Word array as bytes, which is safe as
         // we're only returning a slice up to the actual length in bytes
         let data = u32_slice_to_u8_slice(data);
-        println!("data: {:?}", data);
         data.get(..len as usize)
     }
 
@@ -142,7 +138,6 @@ impl CapAddress {
 
     /// Reserve a block of the given size in bytes
     pub fn reserve_block(&self, data_len_bytes: Word, memory: &mut Memory) -> Option<LenAddress> {
-        println!("reserve_block");
         let cap_words = self.get_cap(memory)?;
         let cap_bytes = cap_words * 4;
 
@@ -211,15 +206,10 @@ where
 
     /// Look at the top item without removing it
     pub fn peek(&self, memory: &Memory) -> Option<I> {
-        println!("peek");
         let len_address = self.0.len_address();
-        println!("len_address: {:?}", len_address);
         let len = len_address.get_len(memory)?;
-        println!("len: {:?}", len);
         let start = len.checked_sub(I::SIZE)?;
-        println!("start: {:?}", start);
         let data = len_address.get_data(memory)?;
-        println!("data: {:?}", data);
         let start = start as usize;
         let end = start + I::SIZE as usize;
         data.get(start..end).and_then(I::load)
@@ -258,11 +248,8 @@ where
 
     /// Cut a block from the stack and move it to the given destination
     pub fn cut_block(&self, to: CapAddress, items: Word, memory: &mut Memory) -> Option<Block<I>> {
-        println!("cut_block");
         let size_bytes = items * I::SIZE;
-        println!("size_bytes: {:?}", size_bytes);
         let dst = to.reserve_block(size_bytes, memory)?;
-        println!("dst: {:?}", dst);
         memory.move_items(dst.clone(), self.0.len_address(), size_bytes)?;
         Some(Block::new(dst))
     }
@@ -451,13 +438,9 @@ impl<'a> Memory<'a> {
 
     // move bytes from one block to another. we assume target block has slot allocated already -- we replace the data
     pub fn move_items(&mut self, to: LenAddress, from: LenAddress, size_bytes: Word) -> Option<()> {
-        println!("move_items {}", size_bytes);
         let to_data_address_bytes = to.data_address() * 4;
-        println!("to_data_address_bytes: {}", to_data_address_bytes);
         let to_data_len_bytes = to.get_len(self)?;
-        println!("to_data_len_bytes: {}", to_data_len_bytes);
         let to_new_data_len_bytes = to_data_len_bytes.checked_sub(size_bytes)?;
-        println!("to_new_data_len_bytes: {}", to_new_data_len_bytes);
 
         let from_data_address_bytes = from.data_address() * 4;
         let from_data_len_bytes = from.get_len(self)?;
@@ -476,7 +459,6 @@ impl<'a> Memory<'a> {
                 memory_bytes[dst + i] = memory_bytes[src + i];
             }
             from.set_len(from_new_data_len_bytes, self)?;
-            println!("move_items done");
             Some(())
         }
     }
@@ -511,9 +493,7 @@ impl<'a> Memory<'a> {
     }
 
     pub fn end(&mut self) -> Option<Block<MemValue>> {
-        println!("end");
         let offset = self.get_parse_base()?.pop(self)?;
-        println!("offset: {}", offset);
         self.get_parse_stack()?
             .cut_block(self.get_heap()?.0.clone(), offset, self)
     }
