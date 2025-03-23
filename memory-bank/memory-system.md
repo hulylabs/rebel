@@ -141,6 +141,13 @@ pub fn reserve_block(&self, size_bytes: Word, memory: &mut Memory) -> Option<Len
 
 Stack operations follow these patterns:
 
+**Stack Allocation** (create a new stack):
+1. Calculate memory needed based on item size and requested capacity
+2. Round up to the nearest word boundary for alignment
+3. Allocate memory region with appropriate capacity
+4. Initialize the stack with zero length
+5. Return a Stack handle for future operations
+
 **Push** (add item to stack):
 1. Calculate new length after push
 2. Ensure capacity is sufficient

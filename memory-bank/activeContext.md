@@ -11,8 +11,10 @@ We are currently strengthening the memory management system for the Rebel interp
 
 ## Recent Work
 
-- Made various internal methods in the memory management system public to support testing
-- Created new unit tests for memory address operations
+- Implemented the `alloc_stack` method in Arena for dynamic stack allocation
+- Added comprehensive tests for stack allocation, including edge cases
+- Fixed memory addressing and allocation issues to ensure proper memory safety
+- Improved documentation for the memory system, especially stack operations
 - Fixed visibility issues with memory operations
 - Successfully resolved all memory test failures 
 - Reorganized and consolidated test code to remove duplication

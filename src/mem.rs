@@ -117,22 +117,32 @@ impl CapAddress {
 
     /// Allocate a slot of the given size in bytes
     pub fn alloc_slot<'a>(&self, size_bytes: Word, memory: &'a mut Memory) -> Option<&'a mut [u8]> {
+        // Get all the information we need up front to avoid double borrow issues
         let cap_words = self.get_cap(memory)?;
+        let cap_bytes = cap_words * 4;
+        let len_address = self.len_address();
+        let old_len = len_address.get_len(memory)?;
+        let new_len = old_len + size_bytes;
 
-        let len_object = memory.get_mut(self.len_address().address(), cap_words + 1)?;
-        let (len_ptr, data) = len_object.split_first_mut()?;
-
-        let len = *len_ptr;
-        let new_len = len + size_bytes;
-
-        if new_len <= cap_words * 4 {
-            let bytes = u32_slice_to_u8_slice_mut(data);
-            let slot = bytes.get_mut(len as usize..new_len as usize)?;
-            *len_ptr = new_len;
-            Some(slot)
-        } else {
-            None
+        // Check if we have enough space
+        if new_len > cap_bytes {
+            return None;
         }
+
+        // Both operations below mutate memory, but we need to sequence them
+        // to avoid the double mutable borrow problem
+
+        // 1. Write the new length to memory
+        let len_addr = len_address.address();
+        memory.set_word(len_addr, new_len)?;
+
+        // 2. Get the data area and create a slice for the newly allocated region
+        let data_addr = self.data_address();
+        let data = memory.get_mut(data_addr, cap_words)?;
+        let bytes = u32_slice_to_u8_slice_mut(data);
+
+        // Return the newly allocated slice
+        bytes.get_mut(old_len as usize..new_len as usize)
     }
 
     /// Reserve a block of the given size in bytes
@@ -173,7 +183,10 @@ impl CapAddress {
         let aligned_len = (len + 3) & !3;
         let cap_bytes = cap_words * 4;
         let new_len = aligned_len + cap_bytes + 8; // 2 words for the cap and len fields
-        if new_len > cap_bytes {
+
+        // Check against the arena's capacity, not the new stack's capacity
+        let arena_cap_bytes = self.get_cap(memory)? * 4;
+        if new_len > arena_cap_bytes {
             None
         } else {
             let offset = aligned_len / 4;
@@ -327,8 +340,23 @@ impl Arena {
         self.0.alloc_block(string.as_bytes(), memory).map(Str)
     }
 
+    /// Allocate a new stack in the arena with capacity for `cap_items` items of type `I`
+    ///
+    /// The capacity is specified in number of items, not bytes. The actual memory
+    /// allocated will be rounded up to the nearest word boundary.
+    ///
+    /// # Parameters
+    /// * `memory` - The memory to allocate the stack in
+    /// * `cap_items` - The capacity of the stack in items
+    ///
+    /// # Returns
+    /// * `Some(Stack<I>)` - A new stack if allocation succeeded
+    /// * `None` - If allocation failed (e.g., not enough memory)
     pub fn alloc_stack<I: Item>(&self, memory: &mut Memory, cap_items: Word) -> Option<Stack<I>> {
-        let cap_words = (cap_items * I::SIZE) / 4;
+        // Calculate capacity in words, rounding up to ensure we have enough space
+        // for all items plus any necessary padding
+        let total_bytes = cap_items * I::SIZE;
+        let cap_words = (total_bytes + 3) / 4; // Round up to nearest word
         self.0.alloc_cap(cap_words, memory).map(Stack::new)
     }
 }
