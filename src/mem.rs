@@ -628,8 +628,64 @@ impl Item for Word {
 
 type Tag = u8;
 
-struct MemValueAligned(Word, Word);
-struct MemValue(Word, Tag);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemValueAligned(Word, Word);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemValue(Word, Tag);
+
+impl MemValue {
+    const TAG_NONE: u8 = 0;
+    const TAG_INT: u8 = 1;
+    const TAG_BOOL: u8 = 2;
+    const TAG_BLOCK: u8 = 3;
+    const TAG_CONTEXT: u8 = 4;
+    const TAG_PATH: u8 = 5;
+    const TAG_STRING: u8 = 6;
+    const TAG_WORD: u8 = 7;
+    const TAG_SET_WORD: u8 = 8;
+    const TAG_GET_WORD: u8 = 9;
+
+    pub fn none() -> Self {
+        MemValue(0, Self::TAG_NONE)
+    }
+
+    pub fn string(value: Str) -> Self {
+        MemValue(value.0.0, Self::TAG_STRING)
+    }
+
+    pub fn bool(value: bool) -> Self {
+        MemValue(value as Word, Self::TAG_BOOL)
+    }
+
+    pub fn int(value: i32) -> Self {
+        MemValue(value as Word, Self::TAG_INT)
+    }
+
+    pub fn block(value: Block<VmValue>) -> Self {
+        MemValue(value.0.0, Self::TAG_BLOCK)
+    }
+
+    pub fn context(value: Block<VmValue>) -> Self {
+        MemValue(value.0.0, Self::TAG_CONTEXT)
+    }
+
+    pub fn path(value: Block<VmValue>) -> Self {
+        MemValue(value.0.0, Self::TAG_PATH)
+    }
+
+    pub fn word(value: LenAddress) -> Self {
+        MemValue(value.0, Self::TAG_WORD)
+    }
+
+    pub fn set_word(value: LenAddress) -> Self {
+        MemValue(value.0, Self::TAG_SET_WORD)
+    }
+
+    pub fn get_word(value: LenAddress) -> Self {
+        MemValue(value.0, Self::TAG_GET_WORD)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VmValue {
@@ -645,53 +701,19 @@ pub enum VmValue {
     GetWord(LenAddress),
 }
 
-#[allow(dead_code)]
-impl VmValue {
-    const TAG_NONE: u8 = 0;
-    const TAG_INT: u8 = 1;
-    const TAG_BOOL: u8 = 2;
-    const TAG_BLOCK: u8 = 3;
-    const TAG_CONTEXT: u8 = 4;
-    const TAG_PATH: u8 = 5;
-    const TAG_STRING: u8 = 6;
-    const TAG_WORD: u8 = 7;
-    const TAG_SET_WORD: u8 = 8;
-    const TAG_GET_WORD: u8 = 9;
-
-    pub fn none() -> Self {
-        VmValue::None
-    }
-
-    pub fn string(value: Str) -> Self {
-        VmValue::String(value)
-    }
-
-    pub fn int(value: i32) -> Self {
-        VmValue::Int(value)
-    }
-
-    pub fn block(value: Block<VmValue>) -> Self {
-        VmValue::Block(value)
-    }
-
-    pub fn path(value: Block<VmValue>) -> Self {
-        VmValue::Path(value)
-    }
-}
-
 impl From<VmValue> for MemValue {
     fn from(value: VmValue) -> Self {
         match value {
-            VmValue::None => MemValue(0, VmValue::TAG_NONE),
-            VmValue::Int(value) => MemValue(value as Word, VmValue::TAG_INT),
-            VmValue::Bool(value) => MemValue(value as Word, VmValue::TAG_BOOL),
-            VmValue::Block(value) => MemValue(value.0.0, VmValue::TAG_BLOCK),
-            VmValue::Context(value) => MemValue(value.0.0, VmValue::TAG_CONTEXT),
-            VmValue::Path(value) => MemValue(value.0.0, VmValue::TAG_PATH),
-            VmValue::String(value) => MemValue(value.0.0, VmValue::TAG_STRING),
-            VmValue::Word(value) => MemValue(value.0, VmValue::TAG_WORD),
-            VmValue::SetWord(value) => MemValue(value.0, VmValue::TAG_SET_WORD),
-            VmValue::GetWord(value) => MemValue(value.0, VmValue::TAG_GET_WORD),
+            VmValue::None => MemValue::none(),
+            VmValue::Int(value) => MemValue::int(value),
+            VmValue::Bool(value) => MemValue::bool(value),
+            VmValue::Block(value) => MemValue::block(value),
+            VmValue::Context(value) => MemValue::context(value),
+            VmValue::Path(value) => MemValue::path(value),
+            VmValue::String(value) => MemValue::string(value),
+            VmValue::Word(value) => MemValue::word(value),
+            VmValue::SetWord(value) => MemValue::set_word(value),
+            VmValue::GetWord(value) => MemValue::get_word(value),
         }
     }
 }
@@ -702,16 +724,16 @@ impl TryFrom<MemValue> for VmValue {
     fn try_from(value: MemValue) -> Result<Self, Self::Error> {
         let tag = value.1 as Tag;
         match tag {
-            VmValue::TAG_NONE => Ok(VmValue::None),
-            VmValue::TAG_INT => Ok(VmValue::Int(value.0 as i32)),
-            VmValue::TAG_BOOL => Ok(VmValue::Bool(value.0 != 0)),
-            VmValue::TAG_BLOCK => Ok(VmValue::Block(Block::new(LenAddress(value.0)))),
-            VmValue::TAG_CONTEXT => Ok(VmValue::Context(Block::new(LenAddress(value.0)))),
-            VmValue::TAG_PATH => Ok(VmValue::Path(Block::new(LenAddress(value.0)))),
-            VmValue::TAG_STRING => Ok(VmValue::String(Str(LenAddress(value.0)))),
-            VmValue::TAG_WORD => Ok(VmValue::Word(LenAddress(value.0))),
-            VmValue::TAG_SET_WORD => Ok(VmValue::SetWord(LenAddress(value.0))),
-            VmValue::TAG_GET_WORD => Ok(VmValue::GetWord(LenAddress(value.0))),
+            MemValue::TAG_NONE => Ok(VmValue::None),
+            MemValue::TAG_INT => Ok(VmValue::Int(value.0 as i32)),
+            MemValue::TAG_BOOL => Ok(VmValue::Bool(value.0 != 0)),
+            MemValue::TAG_BLOCK => Ok(VmValue::Block(Block::new(LenAddress(value.0)))),
+            MemValue::TAG_CONTEXT => Ok(VmValue::Context(Block::new(LenAddress(value.0)))),
+            MemValue::TAG_PATH => Ok(VmValue::Path(Block::new(LenAddress(value.0)))),
+            MemValue::TAG_STRING => Ok(VmValue::String(Str(LenAddress(value.0)))),
+            MemValue::TAG_WORD => Ok(VmValue::Word(LenAddress(value.0))),
+            MemValue::TAG_SET_WORD => Ok(VmValue::SetWord(LenAddress(value.0))),
+            MemValue::TAG_GET_WORD => Ok(VmValue::GetWord(LenAddress(value.0))),
             _ => Err(MemoryError::InvalidTag),
         }
     }
@@ -771,7 +793,7 @@ impl Collector for Memory<'_> {
         let string = self
             .get_heap()?
             .alloc_string(self, string)
-            .map(VmValue::string)?;
+            .map(VmValue::String)?;
         self.get_parse_stack()?.push(string, self)
     }
 
@@ -788,7 +810,7 @@ impl Collector for Memory<'_> {
     }
 
     fn integer(&mut self, value: i32) -> Option<()> {
-        self.get_parse_stack()?.push(VmValue::int(value), self)
+        self.get_parse_stack()?.push(VmValue::Int(value), self)
     }
 
     fn begin_block(&mut self) -> Option<()> {

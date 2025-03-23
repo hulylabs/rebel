@@ -33,7 +33,7 @@ fn test_item_implementations() {
 
     // Test VmValue implementation
     let mut data = [0u8; 8];
-    let value = VmValue::int(42);
+    let value = VmValue::Int(42);
     assert!(value.store(&mut data).is_some());
     let loaded = VmValue::load(&data).unwrap();
     assert_eq!(loaded, value);
@@ -60,7 +60,7 @@ fn test_stack_operations() {
     assert_eq!(stack.len(&memory), Some(0));
 
     // Test push and peek
-    let value = VmValue::int(42);
+    let value = VmValue::Int(42);
     assert!(stack.push(value, &mut memory).is_some());
     assert_eq!(stack.len(&memory), Some(1));
     assert_eq!(stack.peek(&memory), Some(value));
@@ -70,7 +70,7 @@ fn test_stack_operations() {
     assert_eq!(stack.len(&memory), Some(0));
 
     // Test pushing multiple values
-    let values = [VmValue::int(1), VmValue::int(2), VmValue::int(3)];
+    let values = [VmValue::Int(1), VmValue::Int(2), VmValue::Int(3)];
     for &val in &values {
         assert!(stack.push(val, &mut memory).is_some());
     }
@@ -193,7 +193,7 @@ fn test_arena_alloc_stack() {
     assert_eq!(mem_stack.len(&memory), Some(0));
 
     // Push some VmValue items
-    let values = [VmValue::int(10), VmValue::int(20), VmValue::int(30)];
+    let values = [VmValue::Int(10), VmValue::Int(20), VmValue::Int(30)];
 
     for (idx, &val) in values.iter().enumerate() {
         assert!(
@@ -223,13 +223,13 @@ fn test_arena_alloc_block() {
     let heap = memory.get_heap().unwrap();
 
     // Create a few VmValue items directly
-    let int1 = VmValue::int(42);
-    let int2 = VmValue::int(100);
-    let int3 = VmValue::int(-5);
+    let int1 = VmValue::Int(42);
+    let int2 = VmValue::Int(100);
+    let int3 = VmValue::Int(-5);
 
     // Allocate a string and create a string VmValue
     let str_addr = heap.alloc_string(&mut memory, "hello").unwrap();
-    let str_val = VmValue::string(str_addr);
+    let str_val = VmValue::String(str_addr);
 
     // Create an array of VmValue items
     let items = [int1, int2, int3, str_val];
@@ -257,7 +257,7 @@ fn test_arena_alloc_block() {
     );
 
     // Demonstrate creating a block VmValue (e.g., for use in a higher-level block)
-    let block_value = VmValue::block(block.clone());
+    let block_value = VmValue::Block(block.clone());
 
     // Example of how you might use this in a nested structure:
     // Create another block that contains the first block as an item

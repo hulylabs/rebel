@@ -14,7 +14,7 @@ fn test_block_creation_and_read() {
 
     let test_values = [10, 20, 30];
     for &val in &test_values {
-        stack.push(VmValue::int(val), &mut memory).unwrap();
+        stack.push(VmValue::Int(val), &mut memory).unwrap();
     }
 
     let block = memory.end().unwrap();
@@ -23,7 +23,7 @@ fn test_block_creation_and_read() {
     for (i, &val) in test_values.iter().enumerate() {
         assert_eq!(
             block.get(i as u32, &memory),
-            Some(VmValue::int(val)),
+            Some(VmValue::Int(val)),
             "Failed to read value at index {}",
             i
         );
@@ -41,16 +41,16 @@ fn test_block_modification() {
     // Create a block with 2 integers
     memory.begin().unwrap();
     let stack = memory.get_parse_stack().unwrap();
-    stack.push(VmValue::int(1), &mut memory).unwrap();
-    stack.push(VmValue::int(2), &mut memory).unwrap();
+    stack.push(VmValue::Int(1), &mut memory).unwrap();
+    stack.push(VmValue::Int(2), &mut memory).unwrap();
     let block = memory.end().unwrap();
 
     // Verify initial values
-    assert_eq!(block.get(0, &memory), Some(VmValue::int(1)));
-    assert_eq!(block.get(1, &memory), Some(VmValue::int(2)));
+    assert_eq!(block.get(0, &memory), Some(VmValue::Int(1)));
+    assert_eq!(block.get(1, &memory), Some(VmValue::Int(2)));
 
     // Modify a value
-    let new_value = VmValue::int(99);
+    let new_value = VmValue::Int(99);
     assert!(block.set(0, new_value, &mut memory).is_some());
 
     // Verify the modification
@@ -61,7 +61,7 @@ fn test_block_modification() {
     );
     assert_eq!(
         block.get(1, &memory),
-        Some(VmValue::int(2)),
+        Some(VmValue::Int(2)),
         "Unmodified value changed"
     );
 }
@@ -74,22 +74,22 @@ fn test_multiple_blocks() {
     // Create first block with [1, 2]
     memory.begin().unwrap();
     let stack = memory.get_parse_stack().unwrap();
-    stack.push(VmValue::int(1), &mut memory).unwrap();
-    stack.push(VmValue::int(2), &mut memory).unwrap();
+    stack.push(VmValue::Int(1), &mut memory).unwrap();
+    stack.push(VmValue::Int(2), &mut memory).unwrap();
     let block1 = memory.end().unwrap();
 
     // Create second block with [3, 4]
     memory.begin().unwrap();
-    stack.push(VmValue::int(3), &mut memory).unwrap();
-    stack.push(VmValue::int(4), &mut memory).unwrap();
+    stack.push(VmValue::Int(3), &mut memory).unwrap();
+    stack.push(VmValue::Int(4), &mut memory).unwrap();
     let block2 = memory.end().unwrap();
 
     // Verify both blocks contain the expected values
-    assert_eq!(block1.get(0, &memory), Some(VmValue::int(1)));
-    assert_eq!(block1.get(1, &memory), Some(VmValue::int(2)));
+    assert_eq!(block1.get(0, &memory), Some(VmValue::Int(1)));
+    assert_eq!(block1.get(1, &memory), Some(VmValue::Int(2)));
 
-    assert_eq!(block2.get(0, &memory), Some(VmValue::int(3)));
-    assert_eq!(block2.get(1, &memory), Some(VmValue::int(4)));
+    assert_eq!(block2.get(0, &memory), Some(VmValue::Int(3)));
+    assert_eq!(block2.get(1, &memory), Some(VmValue::Int(4)));
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn test_large_block() {
 
     let count = 100;
     for i in 0..count {
-        if stack.push(VmValue::int(i as i32), &mut memory).is_none() {
+        if stack.push(VmValue::Int(i as i32), &mut memory).is_none() {
             panic!("Failed to push item {} to stack", i);
         }
     }
@@ -128,7 +128,7 @@ fn test_large_block() {
     for i in 0..count {
         assert_eq!(
             block.get(i as u32, &memory),
-            Some(VmValue::int(i as i32)),
+            Some(VmValue::Int(i as i32)),
             "Failed to read value at index {}",
             i
         );
