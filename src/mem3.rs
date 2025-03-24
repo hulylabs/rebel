@@ -393,3 +393,10 @@ pub fn alloc_string_3(memory: &mut Memory, string: &str) -> Option<Addr<Block<u8
 pub fn parse_block_3(memory: &mut Memory, input: &str) -> Option<()> {
     crate::parse::Parser::parse(input, memory).ok()
 }
+
+pub fn push_3(memory: &mut Memory, block: Addr<Block<VmValue>>, value: VmValue) -> Option<()> {
+    memory
+        .blocks
+        .get_item_mut(block)?
+        .push(value, &mut memory.values)
+}
