@@ -37,13 +37,32 @@ We are currently enhancing the memory management system for the Rebel interprete
 7. Resolved Rust's borrowing rule conflicts in block operation extensions by moving them to test-only implementations
 8. Eliminated all clippy warnings to ensure idiomatic Rust code
 
+## Current Bug Investigation
+
+We're currently investigating a memory layout bug in the domain-based architecture:
+
+1. When a block is pushed to the stack and then popped, or referenced in a nested structure, 
+   its content is unexpectedly modified:
+   - Example 1: A block containing [1, 2, 3] becomes [42, Block(ref), 3] after push/pop
+   - Example 2: A block containing [1, 2] becomes [0, Block(ref)] when referenced in another block
+
+2. The bug likely relates to incorrect offset/length calculations or memory addressing issues
+   in the domain-based memory system. Values in the domain appear to be arranged as 
+   `[42, free capacity, 1, 2, 3]` but incorrect addressing causes us to read the wrong values.
+
+3. The expected correct behavior is that a block's content should be preserved when:
+   - Pushed to and popped from the stack
+   - Referenced in nested structures
+
 ## Next Steps
 
-1. Implement garbage collection or reference counting for the domain-based memory system
-2. Add memory usage statistics and monitoring
-3. Optimize domain layouts based on access patterns
-4. Develop more specialized domain types for specific use cases
-5. Improve error reporting with detailed failure reasons
+1. Fix the memory addressing bug in the domain-based memory system
+2. Re-enable the commented-out assertions in the previously ignored tests once fixed
+3. Implement garbage collection or reference counting for the domain-based memory system
+4. Add memory usage statistics and monitoring
+5. Optimize domain layouts based on access patterns
+6. Develop more specialized domain types for specific use cases
+7. Improve error reporting with detailed failure reasons
 
 ## Design Considerations
 

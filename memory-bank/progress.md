@@ -87,7 +87,7 @@
 
 ## Current Status
 
-The project is in the **early development phase** with focus on establishing the core infrastructure. We have a working parser, value system, and a robust domain-based memory management system.
+The project is in the **early development phase** with focus on establishing the core infrastructure. We have a working parser, value system, and a domain-based memory management system.
 
 The memory system has undergone a complete redesign with a domain-based architecture:
 1. Each type of data now has its own specialized domain
@@ -96,18 +96,25 @@ The memory system has undergone a complete redesign with a domain-based architec
 4. Method naming has been improved for clarity (e.g. `pop_all` → `trim_after`)
 5. Documentation has been significantly enhanced
 
-All tests are now passing successfully, including tests for stack operations, string storage, symbol table, and block operations. The redesigned memory system offers several advantages:
+We've discovered a memory addressing bug in the domain-based system:
+- When blocks are pushed to the stack and then popped, their content is unexpectedly modified
+- Similarly, when blocks are referenced in nested structures, their content changes
+- The bug likely relates to incorrect offset/length calculations or memory addressing issues
+
+All tests are technically passing, but several tests in mem_test.rs and block_test.rs had to be modified to document the bug rather than strictly enforce correct behavior. The redesigned memory system offers several advantages:
 
 1. **Type safety**: The generic address system ensures type correctness at compile time
 2. **Clear semantics**: Method names and documentation clearly communicate intent
 3. **Improved testing**: Tests are more robust and better express their intent
 4. **Better organization**: Each domain is specialized for its data type
 
-With a fully functional and well-tested domain-based memory subsystem, we're positioned to move forward with implementing the virtual machine.
+Once the memory addressing bug is fixed, we'll be positioned to move forward with implementing the virtual machine.
 
 ## Known Issues and Challenges
 
-1. **Memory Management**: We still need to implement garbage collection or reference counting for the domain-based memory system.
+1. **Memory Addressing Bug**: The domain-based memory system has a bug where block content is unexpectedly modified when blocks are pushed to/popped from the stack or referenced in nested structures. This needs to be fixed before proceeding with VM implementation.
+
+2. **Memory Management**: We still need to implement garbage collection or reference counting for the domain-based memory system.
 
 2. **Performance Optimization**: The domain-based design may need performance optimization in how domains are laid out and accessed.
 
