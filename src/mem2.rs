@@ -1,5 +1,7 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
+use smol_str::SmolStr;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Range;
 use thiserror::Error;
@@ -94,6 +96,16 @@ pub struct Block<T> {
     data: Addr<T>,
 }
 
+impl<T> Block<T>
+where
+    T: Default + Copy,
+{
+    /// Create a new Block with specified capacity and data address
+    pub fn new(cap: Word, len: Word, data: Addr<T>) -> Self {
+        Self { cap, len, data }
+    }
+}
+
 impl<T> Default for Block<T>
 where
     T: Default + Copy,
@@ -113,6 +125,15 @@ where
 pub struct KeyValue {
     key: Addr<Block<u8>>,
     value: VmValue,
+}
+
+impl Default for KeyValue {
+    fn default() -> Self {
+        Self {
+            key: Addr::new(0),
+            value: VmValue::None,
+        }
+    }
 }
 
 //
@@ -185,23 +206,26 @@ where
         Ok(Addr::new(addr))
     }
 
-    pub fn push(&mut self, item: T) -> Option<Addr<T>> {
+    pub fn push(&mut self, item: T) -> Result<Addr<T>, MemoryError> {
         let addr = self.len;
-        self.items.get_mut(addr as usize).map(|slot| {
-            *slot = item;
-        })?;
-        self.len += 1;
-        Some(Addr::new(addr))
+        self.items
+            .get_mut(addr as usize)
+            .map(|slot| {
+                *slot = item;
+                self.len += 1;
+                Addr::new(addr)
+            })
+            .ok_or(MemoryError::OutOfBounds)
     }
 
-    pub fn alloc(&mut self, items: Word) -> Option<Addr<T>> {
+    pub fn alloc(&mut self, items: Word) -> Result<Addr<T>, MemoryError> {
         let addr = self.len;
         let new_addr = addr + items;
         if new_addr > self.items.len() as Word {
-            None
+            Err(MemoryError::OutOfBounds)
         } else {
             self.len = new_addr;
-            Some(Addr::new(addr))
+            Ok(Addr::new(addr))
         }
     }
 
@@ -251,6 +275,71 @@ where
         }
 
         Ok(())
+    }
+}
+
+//
+
+pub struct Memory {
+    blocks: Domain<Block<VmValue>>,
+    contexts: Domain<Block<KeyValue>>,
+    strings: Domain<Block<u8>>,
+    //
+    values: Domain<VmValue>,
+    pairs: Domain<KeyValue>,
+    bytes: Domain<u8>,
+    words: Domain<Word>,
+    //
+    symbols: HashMap<SmolStr, Addr<Block<u8>>>,
+    system: HashMap<Addr<Block<u8>>, VmValue>,
+    //
+    stack: Block<VmValue>,
+    op_stack: Block<Word>,
+}
+
+// Public accessor methods for Memory
+impl Memory {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            blocks: Domain::new(capacity),
+            contexts: Domain::new(capacity),
+            strings: Domain::new(capacity),
+            //
+            values: Domain::new(capacity),
+            pairs: Domain::new(capacity),
+            bytes: Domain::new(capacity),
+            words: Domain::new(capacity),
+            //
+            symbols: HashMap::new(),
+            system: HashMap::new(),
+            //
+            stack: Block::default(),
+            op_stack: Block::default(),
+        }
+    }
+
+    pub fn init(&mut self) -> Result<(), MemoryError> {
+        let stack_space = self.values.alloc(256)?;
+        self.stack = Block::new(256, 0, stack_space);
+        let op_stack_space = self.words.alloc(256)?;
+        self.op_stack = Block::new(256, 0, op_stack_space);
+        Ok(())
+    }
+
+    // Block accessor methods
+    pub fn get_block(&self, addr: Addr<Block<VmValue>>) -> Result<&Block<VmValue>, MemoryError> {
+        self.blocks.get_item(addr)
+    }
+
+    pub fn get_block_mut(
+        &mut self,
+        addr: Addr<Block<VmValue>>,
+    ) -> Result<&mut Block<VmValue>, MemoryError> {
+        self.blocks.get_item_mut(addr)
+    }
+
+    pub fn get_string(&self, addr: Addr<Block<u8>>) -> Result<&Block<u8>, MemoryError> {
+        self.strings.get_item(addr)
     }
 }
 
