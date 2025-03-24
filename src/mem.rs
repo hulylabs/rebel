@@ -66,9 +66,12 @@ where
         if self.0 < cap { Some(self) } else { None }
     }
 
-    // pub fn deref<'a>(self, domain: &'a Domain<T>) -> Option<T> {
-    //     domain.get_item(self)
-    // }
+    pub fn deref<'a, D>(self, domain_provider: &'a D) -> Option<&'a T>
+    where
+        D: GetDomain<T>,
+    {
+        domain_provider.get_domain().get_item(self)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -457,41 +460,6 @@ impl GetDomain<Block<KeyValue>> for Memory {
 
     fn get_domain_mut(&mut self) -> &mut Domain<Block<KeyValue>> {
         &mut self.contexts
-    }
-}
-
-// Module for test-only access to private fields
-#[cfg(test)]
-pub mod test_access {
-    use super::*;
-
-    // Type-safe domain access without string literals
-    pub fn get_domain<T>(memory: &Memory) -> &Domain<T>
-    where
-        Memory: GetDomain<T>,
-    {
-        memory.get_domain()
-    }
-
-    pub fn get_domain_mut<T>(memory: &mut Memory) -> &mut Domain<T>
-    where
-        Memory: GetDomain<T>,
-    {
-        memory.get_domain_mut()
-    }
-
-    // Block data accessor
-    pub fn block_data<T: Default + Copy>(block: &Block<T>) -> Addr<T> {
-        block.data
-    }
-
-    // Symbol comparison functions
-    pub fn symbols_equal(addr1: &Addr<Block<u8>>, addr2: &Addr<Block<u8>>) -> bool {
-        addr1.0 == addr2.0
-    }
-
-    pub fn symbols_not_equal(addr1: &Addr<Block<u8>>, addr2: &Addr<Block<u8>>) -> bool {
-        addr1.0 != addr2.0
     }
 }
 

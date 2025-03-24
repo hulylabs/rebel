@@ -212,8 +212,7 @@ fn test_string_and_symbol_operations() {
 
     // Verify individual bytes of the string
     for (i, byte) in test_str.as_bytes().iter().enumerate() {
-        // Use the data address and block_data helper from test_access
-        let data_addr = crate::mem::test_access::block_data(str_block);
+        let data_addr = str_block.data();
         let byte_addr = data_addr.next(i as Word).unwrap();
         assert_eq!(
             memory.get_byte(byte_addr),
@@ -243,7 +242,7 @@ fn test_string_and_symbol_operations() {
         .expect("Should be able to get the same symbol again");
 
     // Use our helper for comparison
-    assert!(crate::mem::test_access::symbols_equal(&symbol1, &symbol2));
+    assert_eq!(symbol1, symbol2);
 
     // Looking up a different symbol should return a different address
     let symbol3 = memory
@@ -251,9 +250,7 @@ fn test_string_and_symbol_operations() {
         .expect("Should be able to get a different symbol");
 
     // Use our helper for comparison
-    assert!(crate::mem::test_access::symbols_not_equal(
-        &symbol1, &symbol3
-    ));
+    assert_ne!(symbol1, symbol3);
 }
 
 #[test]

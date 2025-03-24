@@ -119,10 +119,7 @@ fn test_symbol_table() {
     let symbol_addr2 = memory.get_symbol(symbol_name).unwrap();
 
     // Use our test helper to compare addresses
-    assert!(crate::mem::test_access::symbols_equal(
-        &symbol_addr,
-        &symbol_addr2
-    ));
+    assert_eq!(symbol_addr, symbol_addr2);
 
     // Verify the symbol is stored as a string
     let bytes = memory.get_string_bytes(symbol_addr).unwrap();
@@ -134,10 +131,7 @@ fn test_symbol_table() {
     let different_addr = memory.get_symbol(different_symbol).unwrap();
 
     // Use our test helper to compare addresses
-    assert!(crate::mem::test_access::symbols_not_equal(
-        &symbol_addr,
-        &different_addr
-    ));
+    assert_ne!(symbol_addr, different_addr);
 }
 
 #[test]
