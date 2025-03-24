@@ -33,7 +33,7 @@ where
 
     pub fn range(self, len: Word, cap: Word) -> Result<Range<usize>, MemoryError> {
         let start = self.0;
-        let end = start + len;
+        let end = start.checked_add(len).ok_or(MemoryError::OutOfBounds)?;
         if end > cap {
             Err(MemoryError::OutOfBounds)
         } else {
@@ -205,14 +205,11 @@ where
         }
     }
 
-    /// Copies a range of items within the domain, implemented using slice::copy_within.
+    /// Copies a range of items within the domain using direct memory operations.
     ///
-    /// This method is a direct wrapper around Rust's slice::copy_within. It copies items
-    /// from one range to another within the domain's allocated space, with bounds checking
-    /// against the domain's current length.
-    ///
-    /// For overlapping ranges, the behavior is exactly that of slice::copy_within - refer
-    /// to Rust's documentation for details on how overlapping ranges are handled.
+    /// This method performs a safe item-by-item copy between memory regions, handling
+    /// overlapping ranges by automatically choosing the appropriate copy direction
+    /// (forward or backward). All operations are bounds-checked to ensure memory safety.
     ///
     /// # Arguments
     /// * `from` - Starting address to copy from
@@ -221,26 +218,38 @@ where
     ///
     /// # Returns
     /// * `Ok(())` if the copy was successful
-    /// * `Err(MemoryError::OutOfBounds)` if either:
-    ///   - Source range (from..from+items) exceeds current length
-    ///   - Destination range (to..to+items) exceeds current length
+    /// * `Err(MemoryError::OutOfBounds)` if:
+    ///   - Integer overflow occurs in address calculations
+    ///   - Source or destination range exceeds domain length
+    ///   - Invalid address access is attempted
     pub fn copy_items(
         &mut self,
         from: Addr<T>,
         to: Addr<T>,
         items: Word,
     ) -> Result<(), MemoryError> {
-        let from = from.address(self.len)?;
-        let to = to.address(self.len)?;
+        // Verify ranges are within bounds
+        let from = from.range(items, self.len)?.start;
+        let to = to.range(items, self.len)?.start;
         let items = items as usize;
 
-        // Validate ranges are within current length
-        if from + items > self.len as usize || to + items > self.len as usize {
-            return Err(MemoryError::OutOfBounds);
+        unsafe {
+            let ptr = self.items.as_mut_ptr();
+            if to > from {
+                // Copy backwards to handle overlapping ranges
+                let mut i = items;
+                while i > 0 {
+                    i -= 1;
+                    *ptr.add(to + i) = *ptr.add(from + i);
+                }
+            } else {
+                // Copy forwards
+                for i in 0..items {
+                    *ptr.add(to + i) = *ptr.add(from + i);
+                }
+            }
         }
 
-        // Use copy_within for efficient copying
-        self.items[..self.len as usize].copy_within(from..from + items, to);
         Ok(())
     }
 }
@@ -430,6 +439,27 @@ mod tests {
             "Should fail when destination range exceeds length"
         );
 
+        // Test integer overflow cases
+        assert!(
+            matches!(
+                domain
+                    .copy_items(Addr::new(u32::MAX - 1), Addr::new(0), 3)
+                    .unwrap_err(),
+                MemoryError::OutOfBounds
+            ),
+            "Should fail when source range would overflow"
+        );
+
+        assert!(
+            matches!(
+                domain
+                    .copy_items(Addr::new(0), Addr::new(u32::MAX - 1), 3)
+                    .unwrap_err(),
+                MemoryError::OutOfBounds
+            ),
+            "Should fail when destination range would overflow"
+        );
+
         Ok(())
     }
 
@@ -502,4 +532,15 @@ mod tests {
         assert_eq!(final3, [1, 2, 3].as_slice());
         Ok(())
     }
+}
+
+// DO NOT USE FOLLOWING CODE:
+
+pub fn copy_items(
+    domain: &mut Domain<usize>,
+    from: Addr<usize>,
+    to: Addr<usize>,
+    items: Word,
+) -> Result<(), MemoryError> {
+    domain.copy_items(from, to, items)
 }
