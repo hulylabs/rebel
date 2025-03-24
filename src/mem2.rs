@@ -1,6 +1,5 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use std::f32::consts::E;
 use std::marker::PhantomData;
 use std::ops::Range;
 use thiserror::Error;
@@ -206,39 +205,42 @@ where
         }
     }
 
-    pub fn move_items(
+    /// Copies a range of items within the domain, implemented using slice::copy_within.
+    ///
+    /// This method is a direct wrapper around Rust's slice::copy_within. It copies items
+    /// from one range to another within the domain's allocated space, with bounds checking
+    /// against the domain's current length.
+    ///
+    /// For overlapping ranges, the behavior is exactly that of slice::copy_within - refer
+    /// to Rust's documentation for details on how overlapping ranges are handled.
+    ///
+    /// # Arguments
+    /// * `from` - Starting address to copy from
+    /// * `to` - Destination address to copy to
+    /// * `items` - Number of items to copy
+    ///
+    /// # Returns
+    /// * `Ok(())` if the copy was successful
+    /// * `Err(MemoryError::OutOfBounds)` if either:
+    ///   - Source range (from..from+items) exceeds current length
+    ///   - Destination range (to..to+items) exceeds current length
+    pub fn copy_items(
         &mut self,
         from: Addr<T>,
         to: Addr<T>,
         items: Word,
     ) -> Result<(), MemoryError> {
-        // Convert addresses using total capacity
-        let cap = self.capacity();
-        let from = from.address(cap)?;
-        let to = to.address(cap)?;
+        let from = from.address(self.len)?;
+        let to = to.address(self.len)?;
         let items = items as usize;
 
-        // Validate source range is within current length
-        if from + items > self.len as usize {
+        // Validate ranges are within current length
+        if from + items > self.len as usize || to + items > self.len as usize {
             return Err(MemoryError::OutOfBounds);
         }
 
-        // Validate destination range is within total capacity
-        if to + items > self.items.len() {
-            return Err(MemoryError::OutOfBounds);
-        }
-
-        // Update length if needed
-        let new_end = to + items;
-        if new_end as Word > self.len {
-            self.len = new_end as Word;
-        }
-
-        // Copy items
-        for i in 0..items {
-            self.items[to + i] = self.items[from + i];
-        }
-
+        // Use copy_within for efficient copying
+        self.items[..self.len as usize].copy_within(from..from + items, to);
         Ok(())
     }
 }
@@ -386,36 +388,48 @@ mod tests {
     }
 
     #[test]
-    fn test_move_items() -> Result<(), MemoryError> {
+    fn test_copy_items() -> Result<(), MemoryError> {
         let mut domain: Domain<i32> = Domain::new(10);
 
         // Setup initial data
         let addr = domain.push_all(&[1, 2, 3, 4, 5])?;
         assert_eq!(domain.len(), 5, "Initial length should be 5");
 
-        // Test non-overlapping move
-        domain.move_items(addr, Addr::new(5), 3)?;
-        let moved = domain.get(Addr::new(5), 3)?;
-        assert_eq!(moved, &[1, 2, 3][..], "Moved items should match");
+        // Test basic copy
+        domain.copy_items(addr, Addr::new(2), 3)?;
+        let copied = domain.get(Addr::new(2), 3)?;
+        assert_eq!(copied, &[1, 2, 3][..], "Copied items should match");
 
-        // Test overlapping move
-        domain.move_items(Addr::new(1), Addr::new(0), 3)?;
-        let overlapped = domain.get(Addr::new(0), 3)?;
-        assert_eq!(overlapped, &[2, 3, 4][..], "Overlapped move should work");
+        // Test zero-length copy (should be no-op)
+        domain.copy_items(addr, Addr::new(2), 0)?;
+        let zero_copy = domain.get(Addr::new(0), 5)?;
+        assert_eq!(
+            zero_copy,
+            &[1, 2, 1, 2, 3][..],
+            "Zero-length copy should not modify data"
+        );
 
-        // Test invalid move operations
-        assert!(matches!(
-            domain
-                .move_items(Addr::new(8), Addr::new(0), 3)
-                .unwrap_err(),
-            MemoryError::OutOfBounds
-        ));
-        assert!(matches!(
-            domain
-                .move_items(Addr::new(0), Addr::new(8), 3)
-                .unwrap_err(),
-            MemoryError::OutOfBounds
-        ));
+        // Test invalid copy operations
+        assert!(
+            matches!(
+                domain
+                    .copy_items(Addr::new(4), Addr::new(0), 2)
+                    .unwrap_err(),
+                MemoryError::OutOfBounds
+            ),
+            "Should fail when source range exceeds length"
+        );
+
+        assert!(
+            matches!(
+                domain
+                    .copy_items(Addr::new(0), Addr::new(4), 2)
+                    .unwrap_err(),
+                MemoryError::OutOfBounds
+            ),
+            "Should fail when destination range exceeds length"
+        );
+
         Ok(())
     }
 
@@ -474,9 +488,9 @@ mod tests {
         assert_eq!(domain.len(), 7);
 
         // Copy items
-        domain.move_items(Addr::new(1), Addr::new(4), 3)?;
-        let moved = domain.get(Addr::new(4), 3)?;
-        assert_eq!(moved, [1, 2, 3].as_slice());
+        domain.copy_items(Addr::new(1), Addr::new(4), 3)?;
+        let copied = domain.get(Addr::new(4), 3)?;
+        assert_eq!(copied, [1, 2, 3].as_slice());
 
         // Verify final state
         assert_eq!(domain.len(), 7);
