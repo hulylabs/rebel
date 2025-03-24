@@ -21,8 +21,10 @@
 
 ### Memory System (mem.rs)
 - ✅ Complete domain-based memory architecture with type safety
-- ✅ Type-safe address representation via generic `Addr<T>` struct
+- ✅ Type-safe address representation via generic `Addr<T>` struct with private fields
 - ✅ Distinct domains for different data types (values, blocks, strings, etc.)
+- ✅ Type-based domain access through the `GetDomain<T>` trait
+- ✅ Marker traits for each domain type to improve type checking
 - ✅ Strongly-typed operations on domains and blocks
 - ✅ Block operations with proper error handling (push, pop, trim_after)
 - ✅ Memory stack for VM operations

@@ -315,32 +315,36 @@ where
     }
 }
 
-pub trait DomainProvider<T> {
-    /// Gets a reference to the domain for type T
-    fn domain(&self) -> &Domain<T>;
+// Marker traits to identify domain types
+pub trait ValueDomain {}
+impl ValueDomain for VmValue {}
 
-    /// Gets a mutable reference to the domain for type T
-    fn domain_mut(&mut self) -> &mut Domain<T>;
+pub trait BlockDomain {}
+impl BlockDomain for Block<VmValue> {}
+
+pub trait StringDomain {}
+impl StringDomain for Block<u8> {}
+
+pub trait ByteDomain {}
+impl ByteDomain for u8 {}
+
+pub trait WordDomain {}
+impl WordDomain for Word {}
+
+pub trait PairDomain {}
+impl PairDomain for KeyValue {}
+
+pub trait ContextDomain {}
+impl ContextDomain for Block<KeyValue> {}
+
+// Type-based domain selector trait
+pub trait GetDomain<T> {
+    /// Get the domain for type T
+    fn get_domain(&self) -> &Domain<T>;
+
+    /// Get the mutable domain for type T
+    fn get_domain_mut(&mut self) -> &mut Domain<T>;
 }
-
-// // Type-specific marker traits to help with type inference
-// pub trait ValueDomain {}
-// impl ValueDomain for VmValue {}
-
-// pub trait BlockDomain {}
-// impl BlockDomain for Block<VmValue> {}
-
-// pub trait StringDomain {}
-// impl StringDomain for Block<u8> {}
-
-// pub trait ByteDomain {}
-// impl ByteDomain for u8 {}
-
-// pub trait WordDomain {}
-// impl WordDomain for Word {}
-
-// pub trait PairDomain {}
-// impl PairDomain for KeyValue {}
 
 pub struct Memory {
     values: Domain<VmValue>,
@@ -374,23 +378,95 @@ impl Memory {
     }
 }
 
+// Implement GetDomain for each domain type
+impl GetDomain<VmValue> for Memory {
+    fn get_domain(&self) -> &Domain<VmValue> {
+        &self.values
+    }
+
+    fn get_domain_mut(&mut self) -> &mut Domain<VmValue> {
+        &mut self.values
+    }
+}
+
+impl GetDomain<Block<VmValue>> for Memory {
+    fn get_domain(&self) -> &Domain<Block<VmValue>> {
+        &self.blocks
+    }
+
+    fn get_domain_mut(&mut self) -> &mut Domain<Block<VmValue>> {
+        &mut self.blocks
+    }
+}
+
+impl GetDomain<Block<u8>> for Memory {
+    fn get_domain(&self) -> &Domain<Block<u8>> {
+        &self.strings
+    }
+
+    fn get_domain_mut(&mut self) -> &mut Domain<Block<u8>> {
+        &mut self.strings
+    }
+}
+
+impl GetDomain<u8> for Memory {
+    fn get_domain(&self) -> &Domain<u8> {
+        &self.bytes
+    }
+
+    fn get_domain_mut(&mut self) -> &mut Domain<u8> {
+        &mut self.bytes
+    }
+}
+
+impl GetDomain<Word> for Memory {
+    fn get_domain(&self) -> &Domain<Word> {
+        &self.words
+    }
+
+    fn get_domain_mut(&mut self) -> &mut Domain<Word> {
+        &mut self.words
+    }
+}
+
+impl GetDomain<KeyValue> for Memory {
+    fn get_domain(&self) -> &Domain<KeyValue> {
+        &self.pairs
+    }
+
+    fn get_domain_mut(&mut self) -> &mut Domain<KeyValue> {
+        &mut self.pairs
+    }
+}
+
+impl GetDomain<Block<KeyValue>> for Memory {
+    fn get_domain(&self) -> &Domain<Block<KeyValue>> {
+        &self.contexts
+    }
+
+    fn get_domain_mut(&mut self) -> &mut Domain<Block<KeyValue>> {
+        &mut self.contexts
+    }
+}
+
 // Module for test-only access to private fields
 #[cfg(test)]
 pub mod test_access {
     use super::*;
 
-    // Memory domain accessors (consolidated)
-    pub fn domain<'a, T>(memory: &'a Memory, domain_type: &'a str) -> Option<&'a Domain<T>> {
-        match domain_type {
-            "values" => Some(unsafe { std::mem::transmute(&memory.values) }),
-            "blocks" => Some(unsafe { std::mem::transmute(&memory.blocks) }),
-            "strings" => Some(unsafe { std::mem::transmute(&memory.strings) }),
-            "bytes" => Some(unsafe { std::mem::transmute(&memory.bytes) }),
-            "words" => Some(unsafe { std::mem::transmute(&memory.words) }),
-            "pairs" => Some(unsafe { std::mem::transmute(&memory.pairs) }),
-            "contexts" => Some(unsafe { std::mem::transmute(&memory.contexts) }),
-            _ => None,
-        }
+    // Type-safe domain access without string literals
+    pub fn get_domain<T>(memory: &Memory) -> &Domain<T>
+    where
+        Memory: GetDomain<T>,
+    {
+        memory.get_domain()
+    }
+
+    pub fn get_domain_mut<T>(memory: &mut Memory) -> &mut Domain<T>
+    where
+        Memory: GetDomain<T>,
+    {
+        memory.get_domain_mut()
     }
 
     // Block data accessor
@@ -516,77 +592,6 @@ impl Memory {
     }
 }
 
-// Implement DomainProvider for each domain type
-impl DomainProvider<VmValue> for Memory {
-    fn domain(&self) -> &Domain<VmValue> {
-        &self.values
-    }
-
-    fn domain_mut(&mut self) -> &mut Domain<VmValue> {
-        &mut self.values
-    }
-}
-
-impl DomainProvider<Block<VmValue>> for Memory {
-    fn domain(&self) -> &Domain<Block<VmValue>> {
-        &self.blocks
-    }
-
-    fn domain_mut(&mut self) -> &mut Domain<Block<VmValue>> {
-        &mut self.blocks
-    }
-}
-
-impl DomainProvider<Block<u8>> for Memory {
-    fn domain(&self) -> &Domain<Block<u8>> {
-        &self.strings
-    }
-
-    fn domain_mut(&mut self) -> &mut Domain<Block<u8>> {
-        &mut self.strings
-    }
-}
-
-impl DomainProvider<u8> for Memory {
-    fn domain(&self) -> &Domain<u8> {
-        &self.bytes
-    }
-
-    fn domain_mut(&mut self) -> &mut Domain<u8> {
-        &mut self.bytes
-    }
-}
-
-impl DomainProvider<Word> for Memory {
-    fn domain(&self) -> &Domain<Word> {
-        &self.words
-    }
-
-    fn domain_mut(&mut self) -> &mut Domain<Word> {
-        &mut self.words
-    }
-}
-
-impl DomainProvider<KeyValue> for Memory {
-    fn domain(&self) -> &Domain<KeyValue> {
-        &self.pairs
-    }
-
-    fn domain_mut(&mut self) -> &mut Domain<KeyValue> {
-        &mut self.pairs
-    }
-}
-
-impl DomainProvider<Block<KeyValue>> for Memory {
-    fn domain(&self) -> &Domain<Block<KeyValue>> {
-        &self.contexts
-    }
-
-    fn domain_mut(&mut self) -> &mut Domain<Block<KeyValue>> {
-        &mut self.contexts
-    }
-}
-
 // Block operation extensions
 impl Memory {
     // Block operations that use domain access
@@ -598,7 +603,7 @@ impl Memory {
         index: Word,
     ) -> Option<&VmValue> {
         let block = self.get_block(block_addr)?;
-        block.get_item(index, self.domain())
+        block.get_item(index, self.get_domain())
     }
 
     /// Set an item in a block at the specified index
@@ -619,8 +624,8 @@ impl Memory {
         // Get the data address of the element
         let value_addr = block.data().capped_next(index, block.len())?;
 
-        // Set the value
-        *self.domain_mut().get_item_mut(value_addr)? = value;
+        // Set the value directly
+        *self.values.get_item_mut(value_addr)? = value;
 
         Some(())
     }
@@ -644,7 +649,7 @@ impl Memory {
         value: VmValue,
     ) -> Option<()> {
         let mut block = *self.get_block(block_addr)?;
-        let result = block.push(value, self.domain_mut());
+        let result = block.push(value, &mut self.values);
         // Update the block in memory
         *self.get_block_mut(block_addr)? = block;
         result
@@ -657,7 +662,7 @@ impl Memory {
         values: &[VmValue],
     ) -> Option<()> {
         let mut block = *self.get_block(block_addr)?;
-        let result = block.push_all(values, self.domain_mut());
+        let result = block.push_all(values, &mut self.values);
         // Update the block in memory
         *self.get_block_mut(block_addr)? = block;
         result
@@ -666,7 +671,7 @@ impl Memory {
     /// Pop a value from a block
     pub fn pop_from_block(&mut self, block_addr: Addr<Block<VmValue>>) -> Option<VmValue> {
         let mut block = *self.get_block(block_addr)?;
-        let value = block.pop(self.domain_mut());
+        let value = block.pop(&mut self.values);
         // Update the block in memory
         *self.get_block_mut(block_addr)? = block;
         value

@@ -12,11 +12,14 @@ We are currently enhancing the memory management system for the Rebel interprete
 ## Recent Work
 
 - Completely reimplemented the memory subsystem using a domain-based design for better type safety
-- Renamed `pop_all` method to `trim_after` with improved documentation to better describe its function
+- Enhanced encapsulation by making the fields of `Addr<T>` and other key structs private
+- Implemented the `GetDomain<T>` trait for type-safe domain access without using unsafe code
+- Added marker traits for each domain type to improve type checking
+- Resolved borrowing issues in memory operations by carefully managing mutable borrows
 - Fixed the implementation of `trim_after` to properly update the block length
 - Rewrote all memory subsystem tests to match the new domain-based implementation
 - Updated documentation in both code and memory bank files to reflect the new architecture
-- Verified that all tests pass with the new domain-based memory system
+- Verified that all tests pass with the improved memory system
 
 ## Completed Issues
 

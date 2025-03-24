@@ -33,14 +33,15 @@ Each domain is a strongly-typed container with safe operations for its specific 
 The new address system uses a generic type parameter to ensure type safety:
 
 ```rust
-#[derive(Debug, Clone, Copy)]
-pub struct Addr<T>(pub Word, PhantomData<T>);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Addr<T>(Word, PhantomData<T>);
 ```
 
-This design ensures that addresses are:
+Note that the field is private, ensuring proper encapsulation. This design ensures that addresses are:
 - Type-safe: An `Addr<Block<VmValue>>` cannot be used where an `Addr<u8>` is expected
 - Clear in intent: The type parameter indicates what the address points to
 - Consistent in implementation: All address operations follow the same patterns
+- Properly encapsulated: Internal details are hidden through accessor methods
 
 ## 3. Core Components
 

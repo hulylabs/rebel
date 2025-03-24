@@ -7,21 +7,24 @@ The Rebel interpreter uses a carefully structured memory system designed for bot
 ### Core Structures
 
 1. **Memory (`Memory`)**: The base container for all memory operations
-   - Manages a raw buffer of 32-bit words (`u32`)
-   - Provides low-level operations (get_word, set_word, get, get_mut)
-   - Divides memory into logical regions for different purposes
+   - Manages multiple domains, each for a specific data type
+   - Provides domain-specific operations through type-safe interfaces
+   - Divides memory into logical domains for different types
 
-2. **Addresses (`LenAddress`, `CapAddress`)**: Memory location abstractions
-   - `LenAddress`: Points to a length-prefixed block of memory
-   - `CapAddress`: Points to a capacity-prefixed region of memory
+2. **Addresses (`Addr<T>`)**: Memory location abstractions
+   - Generic `Addr<T>` for type-safe memory addressing
+   - Properly encapsulated with private fields
    - Provides bounds checking and safe access to memory
 
-3. **Data Structures**:
-   - `Stack<T>`: Generic stack implementation for storing items
+3. **Domains (`Domain<T>`)**: Type-specific memory regions
+   - Each domain contains items of a single type
+   - Operations for allocation, access, and manipulation
+   - Safe access through address abstraction
+
+4. **Data Structures**:
    - `Block<T>`: Sequence of items with random access
-   - `Str`: String representation in memory
-   - `Arena`: Memory arena for allocating objects
-   - `SymbolTable`: String interning system for efficient word storage
+   - Interaction with domains through type-safe interfaces
+   - Symbol table for string interning and word storage
 
 ### Memory Layout
 
