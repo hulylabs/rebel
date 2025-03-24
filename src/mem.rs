@@ -379,62 +379,26 @@ impl Memory {
 pub mod test_access {
     use super::*;
 
-    // Accessor functions for Memory
-    pub fn blocks(memory: &Memory) -> &Domain<Block<VmValue>> {
-        &memory.blocks
+    // Memory domain accessors (consolidated)
+    pub fn domain<'a, T>(memory: &'a Memory, domain_type: &'a str) -> Option<&'a Domain<T>> {
+        match domain_type {
+            "values" => Some(unsafe { std::mem::transmute(&memory.values) }),
+            "blocks" => Some(unsafe { std::mem::transmute(&memory.blocks) }),
+            "strings" => Some(unsafe { std::mem::transmute(&memory.strings) }),
+            "bytes" => Some(unsafe { std::mem::transmute(&memory.bytes) }),
+            "words" => Some(unsafe { std::mem::transmute(&memory.words) }),
+            "pairs" => Some(unsafe { std::mem::transmute(&memory.pairs) }),
+            "contexts" => Some(unsafe { std::mem::transmute(&memory.contexts) }),
+            _ => None,
+        }
     }
 
-    pub fn blocks_mut(memory: &mut Memory) -> &mut Domain<Block<VmValue>> {
-        &mut memory.blocks
-    }
-
-    pub fn values(memory: &Memory) -> &Domain<VmValue> {
-        &memory.values
-    }
-
-    pub fn values_mut(memory: &mut Memory) -> &mut Domain<VmValue> {
-        &mut memory.values
-    }
-
-    pub fn strings(memory: &Memory) -> &Domain<Block<u8>> {
-        &memory.strings
-    }
-
-    pub fn strings_mut(memory: &mut Memory) -> &mut Domain<Block<u8>> {
-        &mut memory.strings
-    }
-
-    pub fn bytes(memory: &Memory) -> &Domain<u8> {
-        &memory.bytes
-    }
-
-    pub fn bytes_mut(memory: &mut Memory) -> &mut Domain<u8> {
-        &mut memory.bytes
-    }
-
-    pub fn words(memory: &Memory) -> &Domain<Word> {
-        &memory.words
-    }
-
-    // Accessor functions for Addr and Block
-
-    pub fn addr_raw<T>(addr: &Addr<T>) -> Word {
-        addr.0
-    }
-
-    pub fn block_cap<T>(block: &Block<T>) -> Word {
-        block.cap
-    }
-
-    pub fn block_len<T>(block: &Block<T>) -> Word {
-        block.len
-    }
-
+    // Block data accessor
     pub fn block_data<T: Default + Copy>(block: &Block<T>) -> Addr<T> {
         block.data
     }
 
-    // Symbol comparison helpers
+    // Symbol comparison functions
     pub fn symbols_equal(addr1: &Addr<Block<u8>>, addr2: &Addr<Block<u8>>) -> bool {
         addr1.0 == addr2.0
     }
@@ -444,22 +408,12 @@ pub mod test_access {
     }
 }
 
-// Additional test helpers for Memory
+// Essential test helpers for Memory
 #[cfg(test)]
 impl Memory {
-    // Get block by address without the Option wrapping
-    pub fn get_block_unwrap(&self, addr: Addr<Block<VmValue>>) -> &Block<VmValue> {
-        self.get_block(addr).unwrap()
-    }
-
     // Get string block by address
     pub fn get_string_block(&self, addr: Addr<Block<u8>>) -> Option<&Block<u8>> {
         self.strings.get_item(addr)
-    }
-
-    // Get a byte from the bytes domain
-    pub fn get_byte(&self, addr: Addr<u8>) -> Option<&u8> {
-        self.bytes.get_item(addr)
     }
 
     // Get string bytes directly
@@ -467,25 +421,10 @@ impl Memory {
         let string_block = self.get_string_block(addr)?;
         self.bytes.get(string_block.data(), string_block.len())
     }
-}
 
-// Helpers for exposing Domain operations for testing only
-#[cfg(test)]
-impl<T> Domain<T>
-where
-    T: Default + Copy,
-{
-    // This function is only needed in test_error_conditions
-    pub fn test_push(&mut self, item: T) -> Option<Addr<T>> {
-        self.push(item)
-    }
-
-    pub fn test_alloc(&mut self, items: Word) -> Option<Addr<T>> {
-        self.alloc(items)
-    }
-
-    pub fn test_move_items(&mut self, from: Addr<T>, to: Addr<T>, items: Word) -> Option<()> {
-        self.move_items(from, to, items)
+    // Get a byte from the bytes domain
+    pub fn get_byte(&self, addr: Addr<u8>) -> Option<&u8> {
+        self.bytes.get_item(addr)
     }
 }
 

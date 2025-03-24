@@ -167,7 +167,7 @@ fn test_memory_api() {
     memory.push_to_block(block_addr, VmValue::Int(5)).unwrap();
 
     // Check that the block has 2 items and verify content
-    let block = memory.get_block_unwrap(block_addr);
+    let block = memory.get_block(block_addr).unwrap();
     assert_eq!(block.len(), 2, "Block should have 2 items");
 
     // Get and verify items using our public API
