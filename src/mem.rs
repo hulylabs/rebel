@@ -32,21 +32,6 @@ where
         Self(address, PhantomData)
     }
 
-    /// Get the raw address value
-    pub fn raw_address(&self) -> Word {
-        self.0
-    }
-
-    /// Compare two addresses of possibly different types
-    pub fn compare_raw<U>(&self, other: &Addr<U>) -> bool {
-        self.0 == other.0
-    }
-
-    /// Returns true if this address's raw value is not equal to the other address's raw value
-    pub fn not_equal_raw<U>(&self, other: &Addr<U>) -> bool {
-        !self.compare_raw(other)
-    }
-
     pub fn address(self, cap: Word) -> Option<usize> {
         if self.0 >= cap {
             None
@@ -275,7 +260,7 @@ where
     }
 
     pub fn get_item_mut(&mut self, addr: Addr<T>) -> Option<&mut T> {
-        self.items.get_mut(addr.raw_address() as usize)
+        self.items.get_mut(addr.address(self.len)?)
     }
 
     pub fn get_mut(&mut self, addr: Addr<T>, len: Word) -> Option<&mut [T]> {
@@ -338,24 +323,24 @@ pub trait DomainProvider<T> {
     fn domain_mut(&mut self) -> &mut Domain<T>;
 }
 
-// Type-specific marker traits to help with type inference
-pub trait ValueDomain {}
-impl ValueDomain for VmValue {}
+// // Type-specific marker traits to help with type inference
+// pub trait ValueDomain {}
+// impl ValueDomain for VmValue {}
 
-pub trait BlockDomain {}
-impl BlockDomain for Block<VmValue> {}
+// pub trait BlockDomain {}
+// impl BlockDomain for Block<VmValue> {}
 
-pub trait StringDomain {}
-impl StringDomain for Block<u8> {}
+// pub trait StringDomain {}
+// impl StringDomain for Block<u8> {}
 
-pub trait ByteDomain {}
-impl ByteDomain for u8 {}
+// pub trait ByteDomain {}
+// impl ByteDomain for u8 {}
 
-pub trait WordDomain {}
-impl WordDomain for Word {}
+// pub trait WordDomain {}
+// impl WordDomain for Word {}
 
-pub trait PairDomain {}
-impl PairDomain for KeyValue {}
+// pub trait PairDomain {}
+// impl PairDomain for KeyValue {}
 
 pub struct Memory {
     values: Domain<VmValue>,

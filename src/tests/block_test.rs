@@ -94,8 +94,8 @@ fn test_multiple_blocks() {
     assert_eq!(block2.len(), 2);
 
     // Verify the blocks are different using our public method
-    assert!(
-        block1_addr.not_equal_raw(&block2_addr),
+    assert_ne!(
+        block1_addr, block2_addr,
         "Block addresses should be different"
     );
 
@@ -303,8 +303,8 @@ fn test_block_nested() {
     let ref_addr = memory.get_block_ref(outer_block_addr, 1).unwrap();
 
     // First verify it's the same block address we created
-    assert!(
-        ref_addr.compare_raw(&inner_block_addr),
+    assert_eq!(
+        ref_addr, inner_block_addr,
         "Block reference address mismatch"
     );
 

@@ -96,7 +96,7 @@ fn test_domain_operations() {
 
     // Verify items were added correctly
     for (i, &val) in items.iter().enumerate() {
-        let addr = Addr::new(addr2.raw_address() + i as Word);
+        let addr = addr2.next(i as Word).unwrap();
         assert_eq!(domain.get_item(addr), Some(&val));
     }
 
@@ -214,7 +214,7 @@ fn test_string_and_symbol_operations() {
     for (i, byte) in test_str.as_bytes().iter().enumerate() {
         // Use the data address and block_data helper from test_access
         let data_addr = crate::mem::test_access::block_data(str_block);
-        let byte_addr = Addr::new(data_addr.raw_address() + i as Word);
+        let byte_addr = data_addr.next(i as Word).unwrap();
         assert_eq!(
             memory.get_byte(byte_addr),
             Some(byte),
