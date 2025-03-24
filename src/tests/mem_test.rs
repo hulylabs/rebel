@@ -122,13 +122,18 @@ fn test_domain_operations() {
 fn test_simple_block_operations() {
     let mut memory = new_test_memory();
 
-    // Test block creation and operations using helper functions
-    let block_addr = alloc_block_3(&mut memory, 5).expect("Should be able to allocate a block");
+    // Test block creation and operations
+    let block_addr = memory
+        .alloc_empty_block(5)
+        .expect("Should be able to allocate a block");
 
-    // Push values
-    push_3(&mut memory, block_addr, VmValue::Int(10)).unwrap();
-    push_3(&mut memory, block_addr, VmValue::Int(20)).unwrap();
-    push_3(&mut memory, block_addr, VmValue::Int(30)).unwrap();
+    // Push values directly
+    {
+        let mut block = memory.blocks.get_item_mut(block_addr).unwrap();
+        block.push(VmValue::Int(10), &mut memory.values).unwrap();
+        block.push(VmValue::Int(20), &mut memory.values).unwrap();
+        block.push(VmValue::Int(30), &mut memory.values).unwrap();
+    }
 
     // Get the block and verify its content
     let block = memory.blocks.get_item(block_addr).unwrap();
@@ -291,16 +296,20 @@ fn test_word_values() {
 }
 
 #[test]
-fn test_helper_functions() {
+fn test_block_and_string_operations() {
     let mut memory = new_test_memory();
 
-    // Test alloc_block_3
-    let block_addr =
-        alloc_block_3(&mut memory, 5).expect("Should be able to allocate a block via helper");
+    // Create a block to hold 5 items
+    let block_addr = memory
+        .alloc_empty_block(5)
+        .expect("Should be able to allocate a block");
 
-    // Test push_3
-    for i in 1..=3 {
-        assert!(push_3(&mut memory, block_addr, VmValue::Int(i)).is_some());
+    // Push values directly to the block
+    {
+        let mut block = memory.blocks.get_item_mut(block_addr).unwrap();
+        for i in 1..=3 {
+            block.push(VmValue::Int(i), &mut memory.values).unwrap();
+        }
     }
 
     // Check block content
@@ -309,18 +318,24 @@ fn test_helper_functions() {
         .get_item(block_addr)
         .expect("Should be able to get the block");
 
-    assert_eq!(block.len(), 3);
+    assert_eq!(block.len(), 3, "Block should have 3 items");
 
+    // Verify each value in the block
     for i in 0..3 {
         assert_eq!(
             block.get_item(i, &memory.values),
-            Some(&VmValue::Int(i as i32 + 1))
+            Some(&VmValue::Int(i as i32 + 1)),
+            "Block item {} should be Int({})",
+            i,
+            i + 1
         );
     }
 
-    // Test alloc_string_3
-    let str_addr = alloc_string_3(&mut memory, "test string")
-        .expect("Should be able to allocate a string via helper");
+    // Test string allocation
+    let test_str = "test string";
+    let str_addr = memory
+        .alloc_string(test_str)
+        .expect("Should be able to allocate a string");
 
     // Check if the string was allocated properly
     let str_block = memory
@@ -328,7 +343,7 @@ fn test_helper_functions() {
         .get_item(str_addr)
         .expect("Should be able to get the string block");
 
-    assert_eq!(str_block.len(), 11); // "test string" is 11 bytes
+    assert_eq!(str_block.len(), 11, "String should have 11 bytes"); // "test string" is 11 bytes
 }
 
 #[test]
