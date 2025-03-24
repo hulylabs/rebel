@@ -152,9 +152,21 @@ where
         Some(())
     }
 
-    pub fn pop_all<'a>(&mut self, offset: Word, domain: &'a mut Domain<T>) -> Option<&'a [T]> {
+    /// Truncates the block at specified offset and returns removed items.
+    ///
+    /// This method:
+    /// - Keeps elements [0..offset] in the block
+    /// - Returns elements [offset..len] that were removed
+    /// - Reduces the block's length to `offset`
+    ///
+    /// For example, a block containing [1,2,3,4,5] with trim_after(2)
+    /// would keep [1,2] in the block and return [3,4,5].
+    pub fn trim_after<'a>(&mut self, offset: Word, domain: &'a mut Domain<T>) -> Option<&'a [T]> {
         let items = self.len.checked_sub(offset)?;
-        domain.get(self.data.capped_next(offset, self.cap)?, items)
+        let result = domain.get(self.data.capped_next(offset, self.cap)?, items);
+        // Update the block length to be equal to the offset
+        self.len = offset;
+        result
     }
 
     pub fn move_to(&mut self, dest: &Block<T>, items: Word, domain: &mut Domain<T>) -> Option<()> {

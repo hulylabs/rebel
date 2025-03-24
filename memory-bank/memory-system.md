@@ -1,258 +1,321 @@
 # Rebel Memory System Documentation
 
-This document provides a comprehensive overview of the Rebel memory system, including its architecture, components, and key operations. The memory system is now fully operational with all tests passing.
+This document provides a comprehensive overview of the new domain-based Rebel memory system, including its architecture, components, and key operations.
 
 ## 1. Overview
 
-The Rebel memory system is a custom memory management implementation designed for the Rebel programming language. It provides low-level memory abstractions to support the language's execution environment, including value representation, memory allocation, and data structures.
+The Rebel memory system has been completely redesigned with a domain-based architecture to provide better memory safety, type checking, and clarity. It provides low-level memory abstractions to support the language's execution environment, including value representation, memory allocation, and data structures.
 
-The memory system is organized around the following core concepts:
-- **Memory**: The root container that manages all memory regions
-- **Addresses**: References to specific locations in memory
-- **Items**: Values that can be stored in and loaded from memory
-- **Blocks and Stacks**: Higher-level data structures built on top of the memory system
+The memory system is now organized around these core concepts:
+- **Memory**: The root container managing multiple domains
+- **Domains**: Type-safe memory regions for different types of data
+- **Addresses**: Typed references to specific locations in memory
+- **Blocks**: Higher-level data structures built on domains
 
 ## 2. Memory Architecture
 
-### 2.1 Memory Layout
+### 2.1 Domain-Based Organization
 
-The memory system divides its space into four main regions:
+The memory system now divides its space into distinct domains, each designed to store a specific type of data:
 
-1. **Symbol Table**: Stores interned strings for efficient symbol lookup
-2. **Parse Stack**: Maintains values during parsing
-3. **Parse Base**: Tracks block nesting during parsing
-4. **Heap**: General-purpose memory for allocating blocks and strings
+1. **Values Domain**: Stores all `VmValue` instances
+2. **Blocks Domain**: Stores block metadata structures
+3. **Strings Domain**: Stores string metadata structures
+4. **Bytes Domain**: Raw byte storage for string data
+5. **Words Domain**: Word-sized integer values for operations
+6. **Pairs Domain**: Key-value pairs for contexts/objects
+7. **Contexts Domain**: Block metadata for contexts
 
-Each region is defined by a capacity and a current length. The memory layout is initialized with specific sizes for each region.
+Each domain is a strongly-typed container with safe operations for its specific type.
 
-### 2.2 Address Types
+### 2.2 Typed Address System
 
-Two key address types are used to refer to memory locations:
+The new address system uses a generic type parameter to ensure type safety:
 
-- **LenAddress**: Points to a length-prefixed block of memory (format: `[length: u32][data...]`)
-- **CapAddress**: Points to a capacity-prefixed region (format: `[capacity: u32][length: u32][data...]`)
+```rust
+#[derive(Debug, Clone, Copy)]
+pub struct Addr<T>(pub Word, PhantomData<T>);
+```
 
-These address types enable efficient memory organization and access patterns.
+This design ensures that addresses are:
+- Type-safe: An `Addr<Block<VmValue>>` cannot be used where an `Addr<u8>` is expected
+- Clear in intent: The type parameter indicates what the address points to
+- Consistent in implementation: All address operations follow the same patterns
 
 ## 3. Core Components
 
 ### 3.1 Memory Values (VmValue)
 
 The `VmValue` is the fundamental value type in the Rebel system. It is an enum with variants for different types:
-- None, Int, Bool for primitive values
-- Block, Context, Path for composite types
-- String for text data
-- Word, SetWord, GetWord for symbols/identifiers
+- `None`: Represents no value/null
+- `Int`: Integer value
+- `Block`: Block of values
+- `Context`: Context/scope
+- `String`: String value
+- `Word`, `SetWord`, `GetWord`: Symbol types
+- `Path`: Path expression
 
-Tags defined in the system:
-- `TAG_NONE`: Represents no value/null (0)
-- `TAG_INT`: Integer value (1)
-- `TAG_BOOL`: Boolean value (2)
-- `TAG_BLOCK`: Block of values (3)
-- `TAG_CONTEXT`: Context/scope (4)
-- `TAG_PATH`: Path expression (5)
-- `TAG_STRING`: String value (6)
-- `TAG_WORD`: Symbol/identifier (7)
-- `TAG_SET_WORD`: Assignment target (8)
-- `TAG_GET_WORD`: Retrieval operator (9)
+### 3.2 Domain<T>
 
-### 3.2 Data Structures
+The `Domain<T>` type provides a type-safe storage area for values of type `T`:
 
-#### Blocks
-
-Blocks are sequences of items in memory. They're represented by a length-prefixed memory region pointed to by a `LenAddress`. Operations:
-- Get length of block
-- Access items by index
-- Memory-efficient storage of sequences
-
-#### Stacks
-
-Stacks allow push/pop operations on sequences of items. They're implemented as a capacity-constrained region with operations:
-- Push: Add an item to the top
-- Pop: Remove and return the top item
-- Peek: View the top item without removing
-- Cut: Extract a subset of items into a new block
-
-#### Symbol Table
-
-The symbol table provides efficient string interning using a hash table implementation with:
-- Open addressing with linear probing
-- xxHash-based hashing function
-- Automatic string deduplication
-
-### 3.3 Memory Operations
-
-Key memory operations include:
-- **Allocation**: Reserve memory for blocks, strings, or other data
-- **Access**: Read from or write to memory locations
-- **Conversion**: Convert between different data representations
-- **Movement**: Move data between memory regions
-
-## 4. Implementation Details
-
-### 4.1 Memory Addressing
-
-The memory system uses 32-bit words as its basic unit. Addresses and offsets are measured in words, while lengths can be specified in bytes or words depending on the context.
-
-### 4.2 Memory Safety
-
-The implementation uses Rust's type system to enforce memory safety. Key patterns:
-- Optional return types to handle errors gracefully
-- Bounds checking to prevent buffer overflows
-- Clear ownership semantics through Rust's borrowing system
-- Unsafe code only where necessary with careful documentation
-
-### 4.3 Byte/Word Conversion
-
-The system handles conversion between words and bytes:
-- Words are 4 bytes each
-- Byte-addressed data is aligned to word boundaries
-- Careful handling of endianness in serialization/deserialization
-
-## 5. Key Operations
-
-### 5.1 Block Creation
-
-Creating a block involves:
-1. Reserving memory for the block in a capacity region
-2. Setting up the length field at the beginning
-3. Initializing the block content if necessary
-
-```
-pub fn reserve_block(&self, size_bytes: Word, memory: &mut Memory) -> Option<LenAddress> {
-    // Allocate space for length field (4 bytes) + data
-    let total_bytes = 4 + size_bytes;
-    let _slot = self.alloc_slot(total_bytes, memory)?;
-    
-    // Calculate block address
-    let len_addr = self.len_address();
-    let current_len = len_addr.get_len(memory)?;
-    let offset_to_block = current_len - total_bytes;
-    let words_offset = offset_to_block / 4;
-    let block_addr = self.data_address() + words_offset;
-    
-    // Create and initialize the block
-    let block = LenAddress(block_addr);
-    memory.set_word(block.address(), size_bytes)?;
-    
-    Some(block)
+```rust
+pub struct Domain<T> {
+    pub items: Box<[T]>,
+    pub len: Word,
 }
 ```
 
-### 5.2 Stack Operations
+Each domain:
+- Stores items of a single type
+- Tracks its current length
+- Provides safe access methods
+- Manages memory allocation
 
-Stack operations follow these patterns:
+### 3.3 Block<T>
 
-**Stack Allocation** (create a new stack):
-1. Calculate memory needed based on item size and requested capacity
-2. Round up to the nearest word boundary for alignment
-3. Allocate memory region with appropriate capacity
-4. Initialize the stack with zero length
-5. Return a Stack handle for future operations
+The `Block<T>` type represents a resizable sequence of items:
 
-**Push** (add item to stack):
-1. Calculate new length after push
-2. Ensure capacity is sufficient
-3. Write the item at the end of the stack
-4. Update stack length
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Block<T> {
+    pub cap: Word,
+    pub len: Word,
+    pub data: Addr<T>,
+}
+```
 
-**Pop** (remove item from stack):
-1. Check if stack is not empty
-2. Calculate new length after pop
-3. Read the item from the end of the stack
-4. Update stack length
-5. Return the item
+A block provides:
+- Fixed capacity with dynamic length
+- Safe access to its items through a domain
+- Operations for manipulating the sequence
 
-### 5.3 Symbol Table Lookup
+## 4. Key Operations
 
-Symbol table operations use a hash-based lookup:
-1. Calculate hash of the symbol
-2. Find bucket in hash table
-3. Check for existing entry
-4. If not found, create new entry
-5. Return address of the symbol
+### 4.1 Domain Operations
+
+Domains provide these core operations:
+
+- **push**: Add a single item to the domain
+  ```rust
+  pub fn push(&mut self, item: T) -> Option<Addr<T>>
+  ```
+
+- **push_all**: Add multiple items at once
+  ```rust
+  pub fn push_all(&mut self, items: &[T]) -> Option<Addr<T>>
+  ```
+
+- **alloc**: Allocate space for multiple items
+  ```rust
+  pub fn alloc(&mut self, items: Word) -> Option<Addr<T>>
+  ```
+
+- **get_item**: Get a reference to an item at a specified address
+  ```rust
+  pub fn get_item(&self, addr: Addr<T>) -> Option<&T>
+  ```
+
+- **get_item_mut**: Get a mutable reference to an item
+  ```rust
+  pub fn get_item_mut(&mut self, addr: Addr<T>) -> Option<&mut T>
+  ```
+
+- **move_items**: Move items between addresses
+  ```rust
+  pub fn move_items(&mut self, from: Addr<T>, to: Addr<T>, items: Word) -> Option<()>
+  ```
+
+### 4.2 Block Operations
+
+Blocks provide these operations:
+
+- **push**: Add an item to the end of the block
+  ```rust
+  pub fn push(&mut self, item: T, domain: &mut Domain<T>) -> Option<()>
+  ```
+
+- **push_all**: Add multiple items to the block
+  ```rust
+  pub fn push_all(&mut self, items: &[T], domain: &mut Domain<T>) -> Option<()>
+  ```
+
+- **trim_after**: Truncate the block at a specified offset and return the removed items
+  ```rust
+  pub fn trim_after<'a>(&mut self, offset: Word, domain: &'a mut Domain<T>) -> Option<&'a [T]>
+  ```
+
+- **pop**: Remove and return the last item
+  ```rust
+  pub fn pop(&mut self, domain: &mut Domain<T>) -> Option<T>
+  ```
+
+- **get_item**: Get a reference to an item by index
+  ```rust
+  pub fn get_item<'a>(&self, index: Word, domain: &'a Domain<T>) -> Option<&'a T>
+  ```
+
+- **move_to**: Move items from this block to another block
+  ```rust
+  pub fn move_to(&mut self, dest: &Block<T>, items: Word, domain: &mut Domain<T>) -> Option<()>
+  ```
+
+### 4.3 Memory Stack Operations
+
+The Memory struct provides a stack for VM operations:
+
+- **stack_push**: Push a value onto the stack
+  ```rust
+  pub fn stack_push(&mut self, value: VmValue) -> Option<()>
+  ```
+
+- **stack_pop**: Pop a value from the stack
+  ```rust
+  pub fn stack_pop(&mut self) -> Option<VmValue>
+  ```
+
+- **stack_len**: Get the current stack length
+  ```rust
+  pub fn stack_len(&self) -> Word
+  ```
+
+### 4.4 Block Creation
+
+The Memory struct provides methods for creating blocks:
+
+- **alloc_empty_block**: Allocate an empty block with specified capacity
+  ```rust
+  pub fn alloc_empty_block(&mut self, cap: Word) -> Option<Addr<Block<VmValue>>>
+  ```
+
+- **alloc_block**: Allocate a block and initialize it with values
+  ```rust
+  pub fn alloc_block(&mut self, items: &[VmValue]) -> Option<Addr<Block<VmValue>>>
+  ```
+
+## 5. Implementation Details
+
+### 5.1 Memory Safety
+
+The new implementation leverages Rust's type system to enforce memory safety:
+
+- Generic types ensure address type safety
+- Option return types handle errors without exceptions
+- Domain boundaries prevent out-of-bounds access
+- Clear ownership semantics through Rust's borrowing system
+
+### 5.2 The `trim_after` Method
+
+The `trim_after` method (previously named `pop_all`) has an improved implementation:
+
+```rust
+pub fn trim_after<'a>(&mut self, offset: Word, domain: &'a mut Domain<T>) -> Option<&'a [T]> {
+    let items = self.len.checked_sub(offset)?;
+    let result = domain.get(self.data.capped_next(offset, self.cap)?, items);
+    // Update the block length to be equal to the offset
+    self.len = offset;
+    result
+}
+```
+
+This method:
+- Keeps elements [0..offset] in the block
+- Returns elements [offset..len] that were removed
+- Reduces the block's length to `offset`
+
+For example, a block containing [1,2,3,4,5] with trim_after(2) would keep [1,2] in the block and return [3,4,5].
+
+### 5.3 Symbol Table
+
+The symbol table uses a HashMap to map strings to their addresses:
+
+```rust
+pub symbols: HashMap<SmolStr, Addr<Block<u8>>>,
+```
+
+This provides:
+- Efficient symbol lookup by name
+- String interning to reduce memory usage
+- Fast symbol equality comparison
 
 ## 6. Performance Considerations
 
 ### 6.1 Memory Layout
 
-The memory layout is designed to optimize for:
-- Locality: Related data is stored close together
-- Allocation speed: Simple bump allocator pattern
+The domain-based design optimizes for:
+- Type safety: Each domain contains a single type of item
+- Allocation efficiency: Simple bump allocation within domains
 - Access speed: Direct addressing with minimal indirection
+- Memory usage: Compact representation of values
 
 ### 6.2 Optimization Techniques
 
 Several optimization techniques are employed:
 - Word-aligned memory access for performance
-- Stack-based allocation pattern for fast LIFO operations
-- String interning to reduce memory usage and comparison cost
-- Reuse of memory blocks where possible
+- Type-based memory organization for better safety and locality
+- Reuse of memory allocation patterns for consistency
+- Clear ownership semantics to avoid unnecessary copying
 
 ## 7. Testing
 
 The memory system is thoroughly tested through unit tests covering:
-- Basic memory operations
-- Stack operations
-- Block creation and access
-- String handling
-- Symbol table functionality
+- Basic domain operations (push, get, alloc)
+- Block operations (push, trim_after, move_to)
+- Memory stack operations (push, pop)
+- String and symbol operations
+- Error conditions and boundary cases
 
-Tests ensure correct behavior and memory safety across all operations.
+Tests verify both the correctness of operations and memory safety across all components.
 
 ## 8. Best Practices
 
-When working with the memory system, follow these best practices:
+When working with the new memory system, follow these practices:
 
-1. **Memory Access**
-   - Always check the return value of memory operations (they return `Option<T>`)
-   - Use high-level abstractions (Stack, Block) when possible instead of direct memory access
-   - Keep track of capacity constraints to prevent allocation failures
+1. **Type Safety**
+   - Use the correct address type (`Addr<T>`) for each operation
+   - Let the compiler help verify type correctness
+   - Avoid type casting between address types
 
-2. **API Usage**
-   - Prefer using domain-specific methods over generic memory access
-   - Use the appropriate address type (LenAddress vs. CapAddress) for each use case
-   - Release memory resources when they're no longer needed
+2. **Error Handling**
+   - Always check the `Option<T>` return value of operations
+   - Use the `?` operator for clean error propagation
+   - Handle None returns appropriately
 
-3. **Testing**
-   - Test memory operations with edge cases (empty, maximum size)
-   - Verify both successful and failure conditions
-   - Test interactions between different memory regions
+3. **Memory Usage**
+   - Be mindful of domain capacities
+   - Release resources when no longer needed
+   - Use block operations for manipulating sequences
 
-4. **Documentation**
-   - Document memory requirements for functions that use the memory system
-   - Clearly comment any unsafe operations or assumptions
-   - Document lifetime requirements for borrowed memory references
+4. **API Usage**
+   - Prefer high-level operations (stack_push, alloc_block) over direct domain access
+   - Use the block API for sequence operations rather than direct memory manipulation
+   - Follow the ownership model for mutable access
 
 ## 9. Troubleshooting
 
-Common issues that may arise and their solutions:
+Common issues and solutions:
 
-1. **Memory bounds errors**
-   - Check capacity calculations
-   - Verify word/byte conversion
-   - Ensure proper alignment
-   - Confirm all regions are properly initialized with sufficient size
+1. **Option returns None**
+   - Check domain capacity limits
+   - Verify address calculations
+   - Ensure indices are within bounds
 
-2. **Invalid address errors**
-   - Confirm address calculation is using the right offset
-   - Check if memory has been properly initialized
-   - Verify pointer arithmetic, especially when converting between bytes and words
-   - Ensure method visibility is correct for test access
+2. **Type mismatch errors**
+   - Verify address types match the domain
+   - Check generic type parameters
+   - Review function signatures for correct types
 
-3. **Stack corruption**
-   - Review push/pop balance
-   - Check length updates
-   - Verify data copying operations
-   - Validate memory state before and after operations
+3. **Block operations fail**
+   - Confirm block capacity is sufficient
+   - Check address validity
+   - Verify block length and capacity constraints
 
 ## 10. Future Enhancements
 
 Potential areas for improvement:
 - Garbage collection for automatic memory management
-- Reference counting for shared resources
-- Memory compaction to reduce fragmentation
-- Region-based allocation for temporary computations
-- More sophisticated error handling with specific error types
+- More specialized domain types for specific use cases
+- Improved error reporting with detailed failure reasons
 - Memory usage statistics and monitoring
-- Optimized memory layout for specific operation patterns
+- Optimized domain layout based on access patterns
+- Safer access patterns with better borrow checking

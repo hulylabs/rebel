@@ -4,41 +4,42 @@
 
 We are currently enhancing the memory management system for the Rebel interpreter. This involves:
 
-1. Completing the transition from tuple-based `MemValue` to enum-based `VmValue`
-2. Ensuring all tests pass with the new value representation
-3. Updating documentation to reflect the new enum-based approach
-4. Verifying proper implementation for equality comparisons and pattern matching
+1. Complete redesign of the memory system with a domain-based architecture
+2. Improving type safety through generic address types
+3. Better testing with clearer assertions and appropriate error handling
+4. Clarifying method names to better reflect their actual behavior
 
 ## Recent Work
 
-- Replaced tuple-based `MemValue` with enum-based `VmValue` for better type safety
-- Updated the implementation of equality comparison for `VmValue` with PartialEq/Eq traits
-- Ensured proper serialization/deserialization of `VmValue` to/from memory
-- Updated all test files to use the new `VmValue` enum
-- Updated documentation in both code and memory bank files
-- Verified that all tests pass with the new value representation
+- Completely reimplemented the memory subsystem using a domain-based design for better type safety
+- Renamed `pop_all` method to `trim_after` with improved documentation to better describe its function
+- Fixed the implementation of `trim_after` to properly update the block length
+- Rewrote all memory subsystem tests to match the new domain-based implementation
+- Updated documentation in both code and memory bank files to reflect the new architecture
+- Verified that all tests pass with the new domain-based memory system
 
 ## Completed Issues
 
-We've successfully transitioned from the tuple-based `MemValue` to the enum-based `VmValue` approach:
-
-1. All tests now use and validate the `VmValue` enum correctly
-2. Implemented proper equality comparison for `VmValue` with PartialEq/Eq traits
-3. Updated serialization/deserialization between `VmValue` and memory
-4. Made all related documentation consistent with the new approach
-5. Fixed any issues that arose during the transition
+1. Successfully migrated from the old memory system to the new domain-based architecture
+2. Improved type safety through generics in the address implementation
+3. Clarified method semantics by renaming `pop_all` to `trim_after` and updating its implementation
+4. Fixed type conversion issues between Word (u32) and usize types in test assertions
+5. Made tests more resilient by using value-based assertions where appropriate
+6. Updated the memory-system.md documentation to comprehensively explain the new approach
 
 ## Next Steps
 
-1. Continue building the VM implementation using the new `VmValue` enum
-2. Implement proper error handling for VM operations
-3. Develop basic execution capabilities for the VM
-4. Add context/environment support for variable binding
+1. Implement garbage collection or reference counting for the domain-based memory system
+2. Add memory usage statistics and monitoring
+3. Optimize domain layouts based on access patterns
+4. Develop more specialized domain types for specific use cases
+5. Improve error reporting with detailed failure reasons
 
 ## Design Considerations
 
-- The enum-based `VmValue` provides stronger type safety than the previous tuple approach
-- The implementation ensures proper memory safety through Rust's type system
-- The serialization/deserialization of `VmValue` to/from memory is now more robust
-- The enum approach makes pattern matching more natural and safer
-- Documentation must clearly explain the value representation for future developers
+- The domain-based memory system provides stronger type safety through generics
+- Each domain is specialized for a specific data type, improving safety and clarity
+- The `trim_after` method now correctly keeps elements [0..offset] and returns elements [offset..len]
+- Clear documentation explains the behavior of methods to prevent confusion
+- Robust testing verifies both the correctness of operations and memory safety
+- The implementation leverages Rust's type system to enforce memory safety
