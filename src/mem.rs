@@ -148,6 +148,11 @@ where
         self.len
     }
 
+    /// Returns true if the block is empty
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     /// Returns the capacity of the block
     pub fn cap(&self) -> Word {
         self.cap
@@ -249,6 +254,11 @@ where
     /// Returns the current length of the domain
     pub fn len(&self) -> Word {
         self.len
+    }
+
+    /// Returns true if the domain is empty
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     pub fn get_item(&self, addr: Addr<T>) -> Option<&T> {
@@ -356,6 +366,7 @@ pub struct Memory {
     contexts: Domain<Block<KeyValue>>,
     //
     symbols: HashMap<SmolStr, Addr<Block<u8>>>,
+    #[allow(dead_code)]
     system: HashMap<Addr<Block<u8>>, VmValue>,
     //
     stack: Block<VmValue>,
@@ -502,6 +513,44 @@ impl Memory {
     pub fn get_byte(&self, addr: Addr<u8>) -> Option<&u8> {
         self.bytes.get_item(addr)
     }
+
+    /// Push a value to a block - Test-only implementation
+    pub fn push_to_block(
+        &mut self,
+        block_addr: Addr<Block<VmValue>>,
+        value: VmValue,
+    ) -> Option<()> {
+        let mut block = *self.get_block(block_addr)?;
+        let result = block.push(value, &mut self.values);
+        *self.get_block_mut(block_addr)? = block;
+        result
+    }
+
+    /// Push multiple values to a block - Test-only implementation
+    pub fn push_all_to_block(
+        &mut self,
+        block_addr: Addr<Block<VmValue>>,
+        values: &[VmValue],
+    ) -> Option<()> {
+        let mut block = *self.get_block(block_addr)?;
+        let result = block.push_all(values, &mut self.values);
+        *self.get_block_mut(block_addr)? = block;
+        result
+    }
+
+    /// Pop a value from a block - Test-only implementation
+    pub fn pop_from_block(&mut self, block_addr: Addr<Block<VmValue>>) -> Option<VmValue> {
+        let mut block = *self.get_block(block_addr)?;
+        let value = block.pop(&mut self.values);
+        *self.get_block_mut(block_addr)? = block;
+        value
+    }
+}
+
+impl Default for Memory {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Memory {
@@ -592,10 +641,8 @@ impl Memory {
     }
 }
 
-// Block operation extensions
+// Core operations without extensions
 impl Memory {
-    // Block operations that use domain access
-
     /// Get an item from a block at the specified index
     pub fn get_block_item(
         &self,
@@ -640,41 +687,6 @@ impl Memory {
             VmValue::Block(addr) => Some(*addr),
             _ => None,
         }
-    }
-
-    /// Push a value to a block
-    pub fn push_to_block(
-        &mut self,
-        block_addr: Addr<Block<VmValue>>,
-        value: VmValue,
-    ) -> Option<()> {
-        let mut block = *self.get_block(block_addr)?;
-        let result = block.push(value, &mut self.values);
-        // Update the block in memory
-        *self.get_block_mut(block_addr)? = block;
-        result
-    }
-
-    /// Push multiple values to a block
-    pub fn push_all_to_block(
-        &mut self,
-        block_addr: Addr<Block<VmValue>>,
-        values: &[VmValue],
-    ) -> Option<()> {
-        let mut block = *self.get_block(block_addr)?;
-        let result = block.push_all(values, &mut self.values);
-        // Update the block in memory
-        *self.get_block_mut(block_addr)? = block;
-        result
-    }
-
-    /// Pop a value from a block
-    pub fn pop_from_block(&mut self, block_addr: Addr<Block<VmValue>>) -> Option<VmValue> {
-        let mut block = *self.get_block(block_addr)?;
-        let value = block.pop(&mut self.values);
-        // Update the block in memory
-        *self.get_block_mut(block_addr)? = block;
-        value
     }
 }
 
