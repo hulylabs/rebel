@@ -21,16 +21,8 @@ pub enum MemoryError {
 
 pub type Word = u32;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Addr<T>(pub Word, PhantomData<T>);
-
-impl<T> PartialEq for Addr<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl<T> Eq for Addr<T> {}
 
 impl<T> Addr<T>
 where
