@@ -22,7 +22,7 @@ pub enum MemoryError {
 pub type Word = u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Addr<T>(pub Word, PhantomData<T>);
+pub struct Addr<T>(Word, PhantomData<T>);
 
 impl<T> Addr<T>
 where
@@ -30,6 +30,21 @@ where
 {
     pub fn new(address: Word) -> Self {
         Self(address, PhantomData)
+    }
+
+    /// Get the raw address value
+    pub fn raw_address(&self) -> Word {
+        self.0
+    }
+
+    /// Compare two addresses of possibly different types
+    pub fn compare_raw<U>(&self, other: &Addr<U>) -> bool {
+        self.0 == other.0
+    }
+
+    /// Returns true if this address's raw value is not equal to the other address's raw value
+    pub fn not_equal_raw<U>(&self, other: &Addr<U>) -> bool {
+        !self.compare_raw(other)
     }
 
     pub fn address(self, cap: Word) -> Option<usize> {
@@ -73,8 +88,30 @@ where
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyValue {
-    pub key: Addr<Block<u8>>,
-    pub value: VmValue,
+    key: Addr<Block<u8>>,
+    value: VmValue,
+}
+
+impl KeyValue {
+    /// Create a new KeyValue pair
+    pub fn new(key: Addr<Block<u8>>, value: VmValue) -> Self {
+        Self { key, value }
+    }
+
+    /// Get the key address
+    pub fn key(&self) -> Addr<Block<u8>> {
+        self.key
+    }
+
+    /// Get the value
+    pub fn value(&self) -> VmValue {
+        self.value
+    }
+
+    /// Set the value
+    pub fn set_value(&mut self, new_value: VmValue) {
+        self.value = new_value;
+    }
 }
 
 impl Default for KeyValue {
@@ -107,17 +144,33 @@ impl Default for VmValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Block<T> {
-    pub cap: Word,
-    pub len: Word,
-    pub data: Addr<T>,
+    cap: Word,
+    len: Word,
+    data: Addr<T>,
 }
 
 impl<T> Block<T>
 where
     T: Default + Copy,
 {
+    /// Create a new Block with specified capacity and data address
+    pub fn new(cap: Word, len: Word, data: Addr<T>) -> Self {
+        Self { cap, len, data }
+    }
+
+    /// Returns the current length of the block
     pub fn len(&self) -> Word {
         self.len
+    }
+
+    /// Returns the capacity of the block
+    pub fn cap(&self) -> Word {
+        self.cap
+    }
+
+    /// Returns the data address of the block
+    pub fn data(&self) -> Addr<T> {
+        self.data
     }
 
     pub fn get_item<'a>(&self, index: Word, domain: &'a Domain<T>) -> Option<&'a T> {
@@ -193,8 +246,8 @@ where
 }
 
 pub struct Domain<T> {
-    pub items: Box<[T]>,
-    pub len: Word,
+    items: Box<[T]>,
+    len: Word,
 }
 
 impl<T> Domain<T>
@@ -208,6 +261,11 @@ where
         }
     }
 
+    /// Returns the current length of the domain
+    pub fn len(&self) -> Word {
+        self.len
+    }
+
     pub fn get_item(&self, addr: Addr<T>) -> Option<&T> {
         self.items.get(addr.address(self.len)?)
     }
@@ -217,7 +275,7 @@ where
     }
 
     pub fn get_item_mut(&mut self, addr: Addr<T>) -> Option<&mut T> {
-        self.items.get_mut(addr.0 as usize)
+        self.items.get_mut(addr.raw_address() as usize)
     }
 
     pub fn get_mut(&mut self, addr: Addr<T>, len: Word) -> Option<&mut [T]> {
@@ -272,24 +330,178 @@ where
     }
 }
 
-// trait DomainProvider<'a, T> {
-//     fn domain(&'a self) -> &'a Domain<T>;
-// }
+pub trait DomainProvider<T> {
+    /// Gets a reference to the domain for type T
+    fn domain(&self) -> &Domain<T>;
+
+    /// Gets a mutable reference to the domain for type T
+    fn domain_mut(&mut self) -> &mut Domain<T>;
+}
+
+// Type-specific marker traits to help with type inference
+pub trait ValueDomain {}
+impl ValueDomain for VmValue {}
+
+pub trait BlockDomain {}
+impl BlockDomain for Block<VmValue> {}
+
+pub trait StringDomain {}
+impl StringDomain for Block<u8> {}
+
+pub trait ByteDomain {}
+impl ByteDomain for u8 {}
+
+pub trait WordDomain {}
+impl WordDomain for Word {}
+
+pub trait PairDomain {}
+impl PairDomain for KeyValue {}
 
 pub struct Memory {
-    pub values: Domain<VmValue>,
-    pub blocks: Domain<Block<VmValue>>,
-    pub strings: Domain<Block<u8>>,
-    pub bytes: Domain<u8>,
-    pub words: Domain<Word>,
-    pub pairs: Domain<KeyValue>,
-    pub contexts: Domain<Block<KeyValue>>,
+    values: Domain<VmValue>,
+    blocks: Domain<Block<VmValue>>,
+    strings: Domain<Block<u8>>,
+    bytes: Domain<u8>,
+    words: Domain<Word>,
+    pairs: Domain<KeyValue>,
+    contexts: Domain<Block<KeyValue>>,
     //
-    pub symbols: HashMap<SmolStr, Addr<Block<u8>>>,
-    pub system: HashMap<Addr<Block<u8>>, VmValue>,
+    symbols: HashMap<SmolStr, Addr<Block<u8>>>,
+    system: HashMap<Addr<Block<u8>>, VmValue>,
     //
-    pub stack: Block<VmValue>,
-    pub op_stack: Block<Word>,
+    stack: Block<VmValue>,
+    op_stack: Block<Word>,
+}
+
+// Public accessor methods for Memory
+impl Memory {
+    // Block accessor methods
+    pub fn get_block(&self, addr: Addr<Block<VmValue>>) -> Option<&Block<VmValue>> {
+        self.blocks.get_item(addr)
+    }
+
+    pub fn get_block_mut(&mut self, addr: Addr<Block<VmValue>>) -> Option<&mut Block<VmValue>> {
+        self.blocks.get_item_mut(addr)
+    }
+
+    pub fn get_string(&self, addr: Addr<Block<u8>>) -> Option<&Block<u8>> {
+        self.strings.get_item(addr)
+    }
+}
+
+// Module for test-only access to private fields
+#[cfg(test)]
+pub mod test_access {
+    use super::*;
+
+    // Accessor functions for Memory
+    pub fn blocks(memory: &Memory) -> &Domain<Block<VmValue>> {
+        &memory.blocks
+    }
+
+    pub fn blocks_mut(memory: &mut Memory) -> &mut Domain<Block<VmValue>> {
+        &mut memory.blocks
+    }
+
+    pub fn values(memory: &Memory) -> &Domain<VmValue> {
+        &memory.values
+    }
+
+    pub fn values_mut(memory: &mut Memory) -> &mut Domain<VmValue> {
+        &mut memory.values
+    }
+
+    pub fn strings(memory: &Memory) -> &Domain<Block<u8>> {
+        &memory.strings
+    }
+
+    pub fn strings_mut(memory: &mut Memory) -> &mut Domain<Block<u8>> {
+        &mut memory.strings
+    }
+
+    pub fn bytes(memory: &Memory) -> &Domain<u8> {
+        &memory.bytes
+    }
+
+    pub fn bytes_mut(memory: &mut Memory) -> &mut Domain<u8> {
+        &mut memory.bytes
+    }
+
+    pub fn words(memory: &Memory) -> &Domain<Word> {
+        &memory.words
+    }
+
+    // Accessor functions for Addr and Block
+
+    pub fn addr_raw<T>(addr: &Addr<T>) -> Word {
+        addr.0
+    }
+
+    pub fn block_cap<T>(block: &Block<T>) -> Word {
+        block.cap
+    }
+
+    pub fn block_len<T>(block: &Block<T>) -> Word {
+        block.len
+    }
+
+    pub fn block_data<T: Default + Copy>(block: &Block<T>) -> Addr<T> {
+        block.data
+    }
+
+    // Symbol comparison helpers
+    pub fn symbols_equal(addr1: &Addr<Block<u8>>, addr2: &Addr<Block<u8>>) -> bool {
+        addr1.0 == addr2.0
+    }
+
+    pub fn symbols_not_equal(addr1: &Addr<Block<u8>>, addr2: &Addr<Block<u8>>) -> bool {
+        addr1.0 != addr2.0
+    }
+}
+
+// Additional test helpers for Memory
+#[cfg(test)]
+impl Memory {
+    // Get block by address without the Option wrapping
+    pub fn get_block_unwrap(&self, addr: Addr<Block<VmValue>>) -> &Block<VmValue> {
+        self.get_block(addr).unwrap()
+    }
+
+    // Get string block by address
+    pub fn get_string_block(&self, addr: Addr<Block<u8>>) -> Option<&Block<u8>> {
+        self.strings.get_item(addr)
+    }
+
+    // Get a byte from the bytes domain
+    pub fn get_byte(&self, addr: Addr<u8>) -> Option<&u8> {
+        self.bytes.get_item(addr)
+    }
+
+    // Get string bytes directly
+    pub fn get_string_bytes(&self, addr: Addr<Block<u8>>) -> Option<&[u8]> {
+        let string_block = self.get_string_block(addr)?;
+        self.bytes.get(string_block.data(), string_block.len())
+    }
+}
+
+// Helpers for exposing Domain operations for testing only
+#[cfg(test)]
+impl<T> Domain<T>
+where
+    T: Default + Copy,
+{
+    // This function is only needed in test_error_conditions
+    pub fn test_push(&mut self, item: T) -> Option<Addr<T>> {
+        self.push(item)
+    }
+
+    pub fn test_alloc(&mut self, items: Word) -> Option<Addr<T>> {
+        self.alloc(items)
+    }
+
+    pub fn test_move_items(&mut self, from: Addr<T>, to: Addr<T>, items: Word) -> Option<()> {
+        self.move_items(from, to, items)
+    }
 }
 
 impl Memory {
@@ -314,19 +526,11 @@ impl Memory {
     pub fn init(&mut self) -> Option<()> {
         // Initialize the stack for values
         let stack_space = self.values.alloc(256)?;
-        self.stack = Block {
-            cap: 256,
-            len: 0,
-            data: stack_space,
-        };
+        self.stack = Block::new(256, 0, stack_space);
 
         // Initialize the op_stack
         let op_stack_space = self.words.alloc(128)?;
-        self.op_stack = Block {
-            cap: 128,
-            len: 0,
-            data: op_stack_space,
-        };
+        self.op_stack = Block::new(128, 0, op_stack_space);
 
         Some(())
     }
@@ -345,31 +549,20 @@ impl Memory {
     }
 
     pub fn alloc_empty_block(&mut self, cap: Word) -> Option<Addr<Block<VmValue>>> {
-        self.blocks.push(Block {
-            cap,
-            len: 0,
-            data: Addr(0, std::marker::PhantomData),
-        })
+        self.blocks.push(Block::new(cap, 0, Addr::new(0)))
     }
 
     pub fn alloc_block(&mut self, items: &[VmValue]) -> Option<Addr<Block<VmValue>>> {
         let data = self.values.push_all(items)?;
         let len = items.len() as Word;
-        self.blocks.push(Block {
-            cap: len,
-            len,
-            data,
-        })
+        self.blocks.push(Block::new(len, len, data))
     }
 
     pub fn alloc_string(&mut self, s: &str) -> Option<Addr<Block<u8>>> {
         let bytes = s.as_bytes();
         let len = bytes.len() as Word;
-        self.strings.push(Block {
-            cap: len,
-            len,
-            data: self.bytes.push_all(bytes)?,
-        })
+        let data = self.bytes.push_all(bytes)?;
+        self.strings.push(Block::new(len, len, data))
     }
 
     pub fn get_symbol(&mut self, string: &str) -> Option<Addr<Block<u8>>> {
@@ -399,11 +592,162 @@ impl Memory {
     }
 }
 
-// impl<'a> DomainProvider<'a, Block<VmValue>> for Memory {
-//     fn domain(&'a self) -> &'a Domain<Block<VmValue>> {
-//         &self.blocks
-//     }
-// }
+// Implement DomainProvider for each domain type
+impl DomainProvider<VmValue> for Memory {
+    fn domain(&self) -> &Domain<VmValue> {
+        &self.values
+    }
+
+    fn domain_mut(&mut self) -> &mut Domain<VmValue> {
+        &mut self.values
+    }
+}
+
+impl DomainProvider<Block<VmValue>> for Memory {
+    fn domain(&self) -> &Domain<Block<VmValue>> {
+        &self.blocks
+    }
+
+    fn domain_mut(&mut self) -> &mut Domain<Block<VmValue>> {
+        &mut self.blocks
+    }
+}
+
+impl DomainProvider<Block<u8>> for Memory {
+    fn domain(&self) -> &Domain<Block<u8>> {
+        &self.strings
+    }
+
+    fn domain_mut(&mut self) -> &mut Domain<Block<u8>> {
+        &mut self.strings
+    }
+}
+
+impl DomainProvider<u8> for Memory {
+    fn domain(&self) -> &Domain<u8> {
+        &self.bytes
+    }
+
+    fn domain_mut(&mut self) -> &mut Domain<u8> {
+        &mut self.bytes
+    }
+}
+
+impl DomainProvider<Word> for Memory {
+    fn domain(&self) -> &Domain<Word> {
+        &self.words
+    }
+
+    fn domain_mut(&mut self) -> &mut Domain<Word> {
+        &mut self.words
+    }
+}
+
+impl DomainProvider<KeyValue> for Memory {
+    fn domain(&self) -> &Domain<KeyValue> {
+        &self.pairs
+    }
+
+    fn domain_mut(&mut self) -> &mut Domain<KeyValue> {
+        &mut self.pairs
+    }
+}
+
+impl DomainProvider<Block<KeyValue>> for Memory {
+    fn domain(&self) -> &Domain<Block<KeyValue>> {
+        &self.contexts
+    }
+
+    fn domain_mut(&mut self) -> &mut Domain<Block<KeyValue>> {
+        &mut self.contexts
+    }
+}
+
+// Block operation extensions
+impl Memory {
+    // Block operations that use domain access
+
+    /// Get an item from a block at the specified index
+    pub fn get_block_item(
+        &self,
+        block_addr: Addr<Block<VmValue>>,
+        index: Word,
+    ) -> Option<&VmValue> {
+        let block = self.get_block(block_addr)?;
+        block.get_item(index, self.domain())
+    }
+
+    /// Set an item in a block at the specified index
+    pub fn set_block_item(
+        &mut self,
+        block_addr: Addr<Block<VmValue>>,
+        index: Word,
+        value: VmValue,
+    ) -> Option<()> {
+        // Get the block
+        let block = self.get_block(block_addr)?;
+
+        // Make sure index is within range
+        if index >= block.len() {
+            return None;
+        }
+
+        // Get the data address of the element
+        let value_addr = block.data().capped_next(index, block.len())?;
+
+        // Set the value
+        *self.domain_mut().get_item_mut(value_addr)? = value;
+
+        Some(())
+    }
+
+    /// Get a block item that's a reference to another block
+    pub fn get_block_ref(
+        &self,
+        block_addr: Addr<Block<VmValue>>,
+        index: Word,
+    ) -> Option<Addr<Block<VmValue>>> {
+        match self.get_block_item(block_addr, index)? {
+            VmValue::Block(addr) => Some(*addr),
+            _ => None,
+        }
+    }
+
+    /// Push a value to a block
+    pub fn push_to_block(
+        &mut self,
+        block_addr: Addr<Block<VmValue>>,
+        value: VmValue,
+    ) -> Option<()> {
+        let mut block = *self.get_block(block_addr)?;
+        let result = block.push(value, self.domain_mut());
+        // Update the block in memory
+        *self.get_block_mut(block_addr)? = block;
+        result
+    }
+
+    /// Push multiple values to a block
+    pub fn push_all_to_block(
+        &mut self,
+        block_addr: Addr<Block<VmValue>>,
+        values: &[VmValue],
+    ) -> Option<()> {
+        let mut block = *self.get_block(block_addr)?;
+        let result = block.push_all(values, self.domain_mut());
+        // Update the block in memory
+        *self.get_block_mut(block_addr)? = block;
+        result
+    }
+
+    /// Pop a value from a block
+    pub fn pop_from_block(&mut self, block_addr: Addr<Block<VmValue>>) -> Option<VmValue> {
+        let mut block = *self.get_block(block_addr)?;
+        let value = block.pop(self.domain_mut());
+        // Update the block in memory
+        *self.get_block_mut(block_addr)? = block;
+        value
+    }
+}
 
 // P A R S E  C O L L E C T O R
 

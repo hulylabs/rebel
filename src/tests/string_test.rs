@@ -10,17 +10,14 @@ fn test_string_allocation_and_retrieval() {
     let test_str = "Hello, Rebel!";
     let string_addr = memory.alloc_string(test_str).unwrap();
 
-    // Get the string block
-    let string_block = memory.strings.get_item(string_addr).unwrap();
+    // Get the string block using our helper method
+    let string_block = memory.get_string_block(string_addr).unwrap();
 
     // Verify string length
-    assert_eq!(string_block.len, test_str.len() as Word);
+    assert_eq!(string_block.len(), test_str.len() as Word);
 
     // Verify string content by reading the bytes
-    let bytes_slice = memory
-        .bytes
-        .get(string_block.data, string_block.len)
-        .unwrap();
+    let bytes_slice = memory.get_string_bytes(string_addr).unwrap();
     assert_eq!(bytes_slice, test_str.as_bytes());
 
     // Convert bytes back to string for verification
@@ -45,13 +42,9 @@ fn test_string_in_vm_value() {
     if let VmValue::String(addr) = popped_value {
         assert_eq!(addr, string_addr);
 
-        // Get the string block and verify its content
-        let string_block = memory.strings.get_item(addr).unwrap();
-        let bytes = memory
-            .bytes
-            .get(string_block.data, string_block.len)
-            .unwrap();
-        let retrieved_str = std::str::from_utf8(bytes).unwrap();
+        // Get the string block and verify its content using our helper methods
+        let bytes_slice = memory.get_string_bytes(addr).unwrap();
+        let retrieved_str = std::str::from_utf8(bytes_slice).unwrap();
         assert_eq!(retrieved_str, test_str);
     } else {
         panic!("Expected a string value");
@@ -73,11 +66,7 @@ fn test_multiple_string_allocations() {
 
     // Verify each string can be retrieved correctly
     for (i, &addr) in string_addrs.iter().enumerate() {
-        let string_block = memory.strings.get_item(addr).unwrap();
-        let bytes = memory
-            .bytes
-            .get(string_block.data, string_block.len)
-            .unwrap();
+        let bytes = memory.get_string_bytes(addr).unwrap();
         let retrieved_str = std::str::from_utf8(bytes).unwrap();
         assert_eq!(retrieved_str, strings[i]);
     }
@@ -94,27 +83,23 @@ fn test_string_in_block() {
 
     // Create a block containing an integer and the string
     let block_addr = memory.alloc_empty_block(2).unwrap();
-    {
-        let mut block = memory.blocks.get_item_mut(block_addr).unwrap();
-        block.push(VmValue::Int(42), &mut memory.values).unwrap();
-        block.push(string_value, &mut memory.values).unwrap();
-    }
+
+    // Push values to the block using our helper method
+    memory.push_to_block(block_addr, VmValue::Int(42)).unwrap();
+    memory.push_to_block(block_addr, string_value).unwrap();
 
     // Get the block and verify its contents
-    let block = memory.blocks.get_item(block_addr).unwrap();
+    let block = memory.get_block(block_addr).unwrap();
     assert_eq!(block.len(), 2);
 
     // Verify the integer value
-    let int_value = block.get_item(0, &memory.values).unwrap();
+    let int_value = memory.get_block_item(block_addr, 0).unwrap();
     assert_eq!(int_value, &VmValue::Int(42));
 
     // Verify the string value
-    if let Some(&VmValue::String(addr)) = block.get_item(1, &memory.values) {
-        let string_block = memory.strings.get_item(addr).unwrap();
-        let bytes = memory
-            .bytes
-            .get(string_block.data, string_block.len)
-            .unwrap();
+    if let Some(&VmValue::String(addr)) = memory.get_block_item(block_addr, 1) {
+        // Get the string bytes and verify
+        let bytes = memory.get_string_bytes(addr).unwrap();
         let retrieved_str = std::str::from_utf8(bytes).unwrap();
         assert_eq!(retrieved_str, test_str);
     } else {
@@ -132,21 +117,27 @@ fn test_symbol_table() {
 
     // Lookup the same symbol again and verify it's the same address
     let symbol_addr2 = memory.get_symbol(symbol_name).unwrap();
-    assert_eq!(symbol_addr, symbol_addr2);
+
+    // Use our test helper to compare addresses
+    assert!(crate::mem::test_access::symbols_equal(
+        &symbol_addr,
+        &symbol_addr2
+    ));
 
     // Verify the symbol is stored as a string
-    let string_block = memory.strings.get_item(symbol_addr).unwrap();
-    let bytes = memory
-        .bytes
-        .get(string_block.data, string_block.len)
-        .unwrap();
+    let bytes = memory.get_string_bytes(symbol_addr).unwrap();
     let retrieved_str = std::str::from_utf8(bytes).unwrap();
     assert_eq!(retrieved_str, symbol_name);
 
     // Verify that different symbols get different addresses
     let different_symbol = "different-symbol";
     let different_addr = memory.get_symbol(different_symbol).unwrap();
-    assert_ne!(symbol_addr, different_addr);
+
+    // Use our test helper to compare addresses
+    assert!(crate::mem::test_access::symbols_not_equal(
+        &symbol_addr,
+        &different_addr
+    ));
 }
 
 #[test]
@@ -157,15 +148,12 @@ fn test_string_with_special_chars() {
     let special_str = "Unicode: 你好, Emoji: 🚀, Symbols: ©®™";
     let string_addr = memory.alloc_string(special_str).unwrap();
 
-    // Verify the string contents
-    let string_block = memory.strings.get_item(string_addr).unwrap();
-    let bytes = memory
-        .bytes
-        .get(string_block.data, string_block.len)
-        .unwrap();
+    // Verify the string contents using our helper methods
+    let bytes = memory.get_string_bytes(string_addr).unwrap();
     let retrieved_str = std::str::from_utf8(bytes).unwrap();
     assert_eq!(retrieved_str, special_str);
 
     // Verify the length in bytes is correct
-    assert_eq!(string_block.len, special_str.len() as Word);
+    let string_block = memory.get_string_block(string_addr).unwrap();
+    assert_eq!(string_block.len(), special_str.len() as Word);
 }
