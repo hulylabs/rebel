@@ -104,6 +104,26 @@ where
     pub fn new(cap: Word, len: Word, data: Addr<T>) -> Self {
         Self { cap, len, data }
     }
+
+    /// Returns the current length of the block
+    pub fn len(&self) -> Word {
+        self.len
+    }
+
+    /// Returns true if the block is empty
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Returns the capacity of the block
+    pub fn capacity(&self) -> Word {
+        self.cap
+    }
+
+    /// Returns the data address of the block
+    pub fn data(&self) -> Addr<T> {
+        self.data
+    }
 }
 
 impl<T> Default for Block<T>
@@ -341,6 +361,90 @@ impl Memory {
     pub fn get_string(&self, addr: Addr<Block<u8>>) -> Result<&Block<u8>, MemoryError> {
         self.strings.get_item(addr)
     }
+
+    pub fn get_string_mut(&mut self, addr: Addr<Block<u8>>) -> Result<&mut Block<u8>, MemoryError> {
+        self.strings.get_item_mut(addr)
+    }
+
+    pub fn get_context(
+        &self,
+        addr: Addr<Block<KeyValue>>,
+    ) -> Result<&Block<KeyValue>, MemoryError> {
+        self.contexts.get_item(addr)
+    }
+
+    pub fn get_context_mut(
+        &mut self,
+        addr: Addr<Block<KeyValue>>,
+    ) -> Result<&mut Block<KeyValue>, MemoryError> {
+        self.contexts.get_item_mut(addr)
+    }
+
+    pub fn alloc_block(&mut self, cap: Word) -> Result<Addr<Block<VmValue>>, MemoryError> {
+        let data = self.values.alloc(cap)?;
+        let block = Block::new(cap, 0, data);
+        self.blocks.push(block)
+    }
+
+    pub fn alloc_string(&mut self, cap: Word) -> Result<Addr<Block<u8>>, MemoryError> {
+        let data = self.bytes.alloc(cap)?;
+        let block = Block::new(cap, 0, data);
+        self.strings.push(block)
+    }
+
+    pub fn alloc_context(&mut self, cap: Word) -> Result<Addr<Block<KeyValue>>, MemoryError> {
+        let data = self.pairs.alloc(cap)?;
+        let block = Block::new(cap, 0, data);
+        self.contexts.push(block)
+    }
+
+    pub fn get_values(&self, addr: Addr<VmValue>, len: Word) -> Result<&[VmValue], MemoryError> {
+        self.values.get(addr, len)
+    }
+
+    pub fn get_values_mut(
+        &mut self,
+        addr: Addr<VmValue>,
+        len: Word,
+    ) -> Result<&mut [VmValue], MemoryError> {
+        self.values.get_mut(addr, len)
+    }
+
+    pub fn get_bytes(&self, addr: Addr<u8>, len: Word) -> Result<&[u8], MemoryError> {
+        self.bytes.get(addr, len)
+    }
+
+    pub fn get_bytes_mut(&mut self, addr: Addr<u8>, len: Word) -> Result<&mut [u8], MemoryError> {
+        self.bytes.get_mut(addr, len)
+    }
+
+    pub fn get_pairs(&self, addr: Addr<KeyValue>, len: Word) -> Result<&[KeyValue], MemoryError> {
+        self.pairs.get(addr, len)
+    }
+
+    pub fn get_pairs_mut(
+        &mut self,
+        addr: Addr<KeyValue>,
+        len: Word,
+    ) -> Result<&mut [KeyValue], MemoryError> {
+        self.pairs.get_mut(addr, len)
+    }
+
+    pub fn get_stack(&self) -> &Block<VmValue> {
+        &self.stack
+    }
+
+    pub fn get_stack_mut(&mut self) -> &mut Block<VmValue> {
+        &mut self.stack
+    }
+
+    pub fn get_op_stack(&self) -> &Block<Word> {
+        &self.op_stack
+    }
+
+    pub fn get_op_stack_mut(&mut self) -> &mut Block<Word> {
+        &mut self.op_stack
+    }
 }
 
 //
@@ -358,13 +462,12 @@ mod tests {
     }
 
     #[test]
-    fn test_domain_capacity() -> Result<(), MemoryError> {
+    fn test_domain_capacity() {
         let mut domain: Domain<i32> = Domain::new(3);
-        assert!(domain.push(1).is_some(), "First push should succeed");
-        assert!(domain.push(2).is_some(), "Second push should succeed");
-        assert!(domain.push(3).is_some(), "Third push should succeed");
-        assert!(domain.push(4).is_none(), "Push beyond capacity should fail");
-        Ok(())
+        assert!(domain.push(1).is_ok(), "First push should succeed");
+        assert!(domain.push(2).is_ok(), "Second push should succeed");
+        assert!(domain.push(3).is_ok(), "Third push should succeed");
+        assert!(domain.push(4).is_err(), "Push beyond capacity should fail");
     }
 
     // Single Item Operations Tests
@@ -373,7 +476,7 @@ mod tests {
         let mut domain: Domain<i32> = Domain::new(5);
 
         // Test push and get_item
-        let addr1 = domain.push(42).ok_or(MemoryError::OutOfBounds)?;
+        let addr1 = domain.push(42)?;
         let item = domain.get_item(addr1)?;
         assert_eq!(item, &42, "Should get pushed item");
 
@@ -392,7 +495,7 @@ mod tests {
     #[test]
     fn test_get_item_mut() -> Result<(), MemoryError> {
         let mut domain: Domain<i32> = Domain::new(5);
-        let addr = domain.push(42).ok_or(MemoryError::OutOfBounds)?;
+        let addr = domain.push(42)?;
 
         // Test get_item_mut and modify value
         *domain.get_item_mut(addr)? = 24;
@@ -466,22 +569,22 @@ mod tests {
         let mut domain: Domain<i32> = Domain::new(5);
 
         // Test zero allocation
-        let addr0 = domain.alloc(0).ok_or(MemoryError::OutOfBounds)?;
+        let addr0 = domain.alloc(0)?;
         assert_eq!(addr0.0, 0, "Zero allocation should return address 0");
 
         // Test normal allocation
-        let _addr1 = domain.alloc(3).ok_or(MemoryError::OutOfBounds)?;
+        let _addr1 = domain.alloc(3)?;
         assert_eq!(domain.len(), 3, "Length should match allocated size");
 
         // Test allocation at capacity
-        let addr2 = domain.alloc(2).ok_or(MemoryError::OutOfBounds)?;
+        let addr2 = domain.alloc(2)?;
         assert_eq!(addr2.0, 3, "Should allocate at correct address");
 
         // Test allocation beyond capacity
-        assert!(
-            domain.alloc(1).is_none(),
-            "Should fail when exceeding capacity"
-        );
+        assert!(matches!(
+            domain.alloc(1).unwrap_err(),
+            MemoryError::OutOfBounds
+        ));
         Ok(())
     }
 
@@ -508,77 +611,213 @@ mod tests {
         );
 
         // Test invalid copy operations
-        assert!(
-            matches!(
-                domain
-                    .copy_items(Addr::new(4), Addr::new(0), 2)
-                    .unwrap_err(),
-                MemoryError::OutOfBounds
-            ),
-            "Should fail when source range exceeds length"
-        );
+        assert!(matches!(
+            domain
+                .copy_items(Addr::new(4), Addr::new(0), 2)
+                .unwrap_err(),
+            MemoryError::OutOfBounds
+        ));
 
-        assert!(
-            matches!(
-                domain
-                    .copy_items(Addr::new(0), Addr::new(4), 2)
-                    .unwrap_err(),
-                MemoryError::OutOfBounds
-            ),
-            "Should fail when destination range exceeds length"
-        );
+        assert!(matches!(
+            domain
+                .copy_items(Addr::new(0), Addr::new(4), 2)
+                .unwrap_err(),
+            MemoryError::OutOfBounds
+        ));
 
         // Test integer overflow cases
-        assert!(
-            matches!(
-                domain
-                    .copy_items(Addr::new(u32::MAX - 1), Addr::new(0), 3)
-                    .unwrap_err(),
-                MemoryError::OutOfBounds
-            ),
-            "Should fail when source range would overflow"
-        );
+        assert!(matches!(
+            domain
+                .copy_items(Addr::new(u32::MAX - 1), Addr::new(0), 3)
+                .unwrap_err(),
+            MemoryError::OutOfBounds
+        ));
 
-        assert!(
-            matches!(
-                domain
-                    .copy_items(Addr::new(0), Addr::new(u32::MAX - 1), 3)
-                    .unwrap_err(),
-                MemoryError::OutOfBounds
-            ),
-            "Should fail when destination range would overflow"
-        );
+        assert!(matches!(
+            domain
+                .copy_items(Addr::new(0), Addr::new(u32::MAX - 1), 3)
+                .unwrap_err(),
+            MemoryError::OutOfBounds
+        ));
 
         Ok(())
     }
 
-    // Boundary Tests
+    // Block Tests
     #[test]
-    fn test_address_boundaries() -> Result<(), MemoryError> {
-        let mut domain: Domain<i32> = Domain::new(5);
-        domain.push_all(&[1, 2, 3, 4, 5])?;
+    fn test_block_operations() {
+        let block = Block::<i32>::new(10, 5, Addr::new(0));
+        assert_eq!(block.len(), 5);
+        assert_eq!(block.capacity(), 10);
+        assert_eq!(block.data(), Addr::new(0));
+        assert!(!block.is_empty());
 
-        // Test address 0
-        assert!(
-            domain.get_item(Addr::new(0)).is_ok(),
-            "Should access address 0"
-        );
+        let empty_block = Block::<i32>::default();
+        assert_eq!(empty_block.len(), 0);
+        assert_eq!(empty_block.capacity(), 0);
+        assert_eq!(empty_block.data(), Addr::new(0));
+        assert!(empty_block.is_empty());
+    }
 
-        // Test last valid address
-        assert!(
-            domain.get_item(Addr::new(4)).is_ok(),
-            "Should access last valid address"
-        );
+    // Memory Tests
+    #[test]
+    fn test_memory_initialization() -> Result<(), MemoryError> {
+        let mut memory = Memory::new(1024);
+        memory.init()?;
 
-        // Test first invalid address
+        assert_eq!(memory.stack.capacity(), 256);
+        assert_eq!(memory.stack.len(), 0);
+        assert_eq!(memory.op_stack.capacity(), 256);
+        assert_eq!(memory.op_stack.len(), 0);
+
+        // Test stack access
+        let stack = memory.get_stack();
+        assert!(stack.is_empty());
+        assert_eq!(stack.capacity(), 256);
+
+        let op_stack = memory.get_op_stack();
+        assert!(op_stack.is_empty());
+        assert_eq!(op_stack.capacity(), 256);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_memory_block_operations() -> Result<(), MemoryError> {
+        let mut memory = Memory::new(1024);
+        memory.init()?;
+
+        // Test block allocation
+        let block_addr = memory.alloc_block(5)?;
+        {
+            let block = memory.get_block(block_addr)?;
+            assert_eq!(block.capacity(), 5);
+            assert_eq!(block.len(), 0);
+
+            // Test block data access
+            let values = memory.get_values(block.data(), block.capacity())?;
+            assert_eq!(values.len(), 5);
+            assert!(values.iter().all(|v| matches!(v, VmValue::None)));
+        }
+
+        // Test block mutation
+        {
+            let block_mut = memory.get_block_mut(block_addr)?;
+            assert_eq!(block_mut.capacity(), 5);
+        }
+
+        // Get block data address for mutation
+        let data_addr = memory.get_block(block_addr)?.data();
+
+        // Test block data mutation
+        {
+            let values_mut = memory.get_values_mut(data_addr, 5)?;
+            values_mut[0] = VmValue::Int(42);
+        }
+
+        // Verify mutation
+        {
+            let values = memory.get_values(data_addr, 5)?;
+            assert_eq!(values[0], VmValue::Int(42));
+        }
+
+        // Test invalid block access
         assert!(matches!(
-            domain.get_item(Addr::new(5)).unwrap_err(),
+            memory.get_block(Addr::new(999)).unwrap_err(),
             MemoryError::OutOfBounds
         ));
+        Ok(())
+    }
 
-        // Test max address
+    #[test]
+    fn test_memory_string_operations() -> Result<(), MemoryError> {
+        let mut memory = Memory::new(1024);
+        memory.init()?;
+
+        // Test string allocation and get data address
+        let string_addr = memory.alloc_string(10)?;
+        let data_addr = {
+            let string = memory.get_string(string_addr)?;
+            assert_eq!(string.capacity(), 10);
+            assert_eq!(string.len(), 0);
+            string.data()
+        };
+
+        // Test initial string data
+        {
+            let bytes = memory.get_bytes(data_addr, 10)?;
+            assert_eq!(bytes.len(), 10);
+            assert!(bytes.iter().all(|&b| b == 0));
+        }
+
+        // Test string data mutation
+        {
+            let bytes_mut = memory.get_bytes_mut(data_addr, 10)?;
+            bytes_mut[0] = b'A';
+        }
+
+        // Verify mutation
+        {
+            let bytes = memory.get_bytes(data_addr, 10)?;
+            assert_eq!(bytes[0], b'A');
+        }
+
+        // Test string mutation
+        {
+            let string_mut = memory.get_string_mut(string_addr)?;
+            assert_eq!(string_mut.capacity(), 10);
+        }
+
+        // Test invalid string access
         assert!(matches!(
-            domain.get_item(Addr::new(u32::MAX)).unwrap_err(),
+            memory.get_string(Addr::new(999)).unwrap_err(),
+            MemoryError::OutOfBounds
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn test_memory_context_operations() -> Result<(), MemoryError> {
+        let mut memory = Memory::new(1024);
+        memory.init()?;
+
+        // Test context allocation and get data address
+        let context_addr = memory.alloc_context(8)?;
+        let data_addr = {
+            let context = memory.get_context(context_addr)?;
+            assert_eq!(context.capacity(), 8);
+            assert_eq!(context.len(), 0);
+            context.data()
+        };
+
+        // Test initial context data
+        {
+            let pairs = memory.get_pairs(data_addr, 8)?;
+            assert_eq!(pairs.len(), 8);
+            assert!(pairs.iter().all(|p| matches!(p.value, VmValue::None)));
+        }
+
+        // Test context data mutation
+        {
+            let pairs_mut = memory.get_pairs_mut(data_addr, 8)?;
+            pairs_mut[0].value = VmValue::Int(42);
+        }
+
+        // Verify mutation
+        {
+            let pairs = memory.get_pairs(data_addr, 8)?;
+            assert_eq!(pairs[0].value, VmValue::Int(42));
+        }
+
+        // Test context mutation
+        {
+            let context_mut = memory.get_context_mut(context_addr)?;
+            assert_eq!(context_mut.capacity(), 8);
+        }
+
+        // Test invalid context access
+        assert!(matches!(
+            memory.get_context(Addr::new(999)).unwrap_err(),
             MemoryError::OutOfBounds
         ));
         Ok(())
@@ -590,7 +829,7 @@ mod tests {
         let mut domain: Domain<i32> = Domain::new(10);
 
         // Push single items
-        let addr1 = domain.push(42).ok_or(MemoryError::OutOfBounds)?;
+        let addr1 = domain.push(42)?;
         assert_eq!(domain.len(), 1);
         assert!(!domain.is_empty());
         let item1 = domain.get_item(addr1)?;
@@ -603,7 +842,7 @@ mod tests {
         assert_eq!(slice2, [1, 2, 3].as_slice());
 
         // Allocate space
-        let addr3 = domain.alloc(3).ok_or(MemoryError::OutOfBounds)?;
+        let addr3 = domain.alloc(3)?;
         assert_eq!(domain.len(), 7);
 
         // Copy items
