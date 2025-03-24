@@ -8,12 +8,29 @@ use std::ops::Range;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum MemoryError {}
+pub enum MemoryError {
+    #[error("out of memory")]
+    OutOfMemory,
+
+    #[error("invalid address")]
+    InvalidAddress,
+
+    #[error("operation failed")]
+    OperationFailed,
+}
 
 pub type Word = u32;
 
 #[derive(Debug, Clone, Copy)]
-pub struct Addr<T>(Word, PhantomData<T>);
+pub struct Addr<T>(pub Word, PhantomData<T>);
+
+impl<T> PartialEq for Addr<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T> Eq for Addr<T> {}
 
 impl<T> Addr<T>
 where
@@ -62,10 +79,10 @@ where
     // }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct KeyValue {
-    key: Addr<Block<u8>>,
-    value: VmValue,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyValue {
+    pub key: Addr<Block<u8>>,
+    pub value: VmValue,
 }
 
 impl Default for KeyValue {
@@ -77,7 +94,7 @@ impl Default for KeyValue {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VmValue {
     None,
     Int(i32),
@@ -96,11 +113,11 @@ impl Default for VmValue {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Block<T> {
-    cap: Word,
-    len: Word,
-    data: Addr<T>,
+    pub cap: Word,
+    pub len: Word,
+    pub data: Addr<T>,
 }
 
 impl<T> Block<T>
@@ -172,8 +189,8 @@ where
 }
 
 pub struct Domain<T> {
-    items: Box<[T]>,
-    len: Word,
+    pub items: Box<[T]>,
+    pub len: Word,
 }
 
 impl<T> Domain<T>
@@ -256,23 +273,23 @@ where
 // }
 
 pub struct Memory {
-    values: Domain<VmValue>,
-    blocks: Domain<Block<VmValue>>,
-    strings: Domain<Block<u8>>,
-    bytes: Domain<u8>,
-    words: Domain<Word>,
-    pairs: Domain<KeyValue>,
-    contexts: Domain<Block<KeyValue>>,
+    pub values: Domain<VmValue>,
+    pub blocks: Domain<Block<VmValue>>,
+    pub strings: Domain<Block<u8>>,
+    pub bytes: Domain<u8>,
+    pub words: Domain<Word>,
+    pub pairs: Domain<KeyValue>,
+    pub contexts: Domain<Block<KeyValue>>,
     //
-    symbols: HashMap<SmolStr, Addr<Block<u8>>>,
-    system: HashMap<Addr<Block<u8>>, VmValue>,
+    pub symbols: HashMap<SmolStr, Addr<Block<u8>>>,
+    pub system: HashMap<Addr<Block<u8>>, VmValue>,
     //
-    stack: Block<VmValue>,
-    op_stack: Block<Word>,
+    pub stack: Block<VmValue>,
+    pub op_stack: Block<Word>,
 }
 
 impl Memory {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             bytes: Domain::new(0x10000),
             words: Domain::new(0x10000),
@@ -290,14 +307,37 @@ impl Memory {
         }
     }
 
-    fn init(&mut self) -> Option<()> {
-        let space = self.values.alloc(256)?;
+    pub fn init(&mut self) -> Option<()> {
+        // Initialize the stack for values
+        let stack_space = self.values.alloc(256)?;
         self.stack = Block {
             cap: 256,
             len: 0,
-            data: space,
+            data: stack_space,
         };
+
+        // Initialize the op_stack
+        let op_stack_space = self.words.alloc(128)?;
+        self.op_stack = Block {
+            cap: 128,
+            len: 0,
+            data: op_stack_space,
+        };
+
         Some(())
+    }
+
+    // Stack manipulation helpers
+    pub fn stack_push(&mut self, value: VmValue) -> Option<()> {
+        self.stack.push(value, &mut self.values)
+    }
+
+    pub fn stack_pop(&mut self) -> Option<VmValue> {
+        self.stack.pop(&mut self.values)
+    }
+
+    pub fn stack_len(&self) -> Word {
+        self.stack.len()
     }
 
     pub fn alloc_empty_block(&mut self, cap: Word) -> Option<Addr<Block<VmValue>>> {
