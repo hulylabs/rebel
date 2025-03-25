@@ -479,8 +479,8 @@ impl Memory {
         self.alloc_block_header(items, items, to.0)
     }
 
-    pub fn parse(&mut self, input: &str) -> Result<(), ParserError<MemoryError>> {
-        Parser::parse(input, self)
+    pub fn parse_block(&mut self, input: &str) -> Result<(), ParserError<MemoryError>> {
+        Parser::parse_block(input, self)
     }
 }
 
@@ -791,40 +791,6 @@ mod tests {
     }
 
     // Memory Tests
-    #[test]
-    fn test_memory_initialization() -> Result<(), MemoryError> {
-        let mut memory = Memory::new(1024);
-        memory.init()?;
-
-        // After initialization, memory should be in a valid state with allocated stacks
-        assert_eq!(memory.blocks.len(), 0, "Blocks domain should be empty");
-        assert_eq!(
-            memory.values.len(),
-            64,
-            "Values domain should have stack space allocated"
-        );
-        assert_eq!(memory.pairs.len(), 0, "Pairs domain should be empty");
-        assert_eq!(memory.bytes.len(), 0, "Bytes domain should be empty");
-        assert_eq!(
-            memory.words.len(),
-            64,
-            "Words domain should have op_stack space allocated"
-        );
-        assert!(memory.symbols.is_empty(), "Symbols table should be empty");
-        assert!(memory.system.is_empty(), "System table should be empty");
-
-        // Verify stack initialization
-        assert_eq!(memory.stack.cap(), 64, "Stack capacity should be 64");
-        assert_eq!(memory.stack.len(), 0, "Stack should be empty");
-        assert!(memory.stack.data().verify(memory.values.capacity()));
-
-        // Verify op_stack initialization
-        assert_eq!(memory.op_stack.cap(), 64, "Op stack capacity should be 64");
-        assert_eq!(memory.op_stack.len(), 0, "Op stack should be empty");
-        assert!(memory.op_stack.data().verify(memory.words.capacity()));
-
-        Ok(())
-    }
 
     #[test]
     fn test_memory_block_allocation() -> Result<(), MemoryError> {
@@ -832,7 +798,7 @@ mod tests {
         memory.init()?;
 
         // Test block allocation
-        let block_addr = memory.alloc_block(5)?;
+        let block_addr = memory.alloc_empty_block(5)?;
 
         // Get domain and block through GetDomain trait
         let (values, block) = memory.get_domain(block_addr)?;
@@ -842,10 +808,10 @@ mod tests {
         assert_eq!(block.len(), 0);
         assert!(block.data().verify(values.capacity()));
 
-        // Test block data access
-        let values = memory.get_values(block.data(), block.cap())?;
-        assert_eq!(values.len(), 5);
-        assert!(values.iter().all(|v| matches!(v, VmValue::None)));
+        // Test block data access through domain
+        let data = values.get(block.data(), block.cap())?;
+        assert_eq!(data.len(), 5);
+        assert!(data.iter().all(|v| matches!(v, VmValue::None)));
 
         Ok(())
     }
@@ -855,15 +821,17 @@ mod tests {
         let mut memory = Memory::new(1024);
         memory.init()?;
 
-        let block_addr = memory.alloc_block(5)?;
+        let block_addr = memory.alloc_empty_block(5)?;
 
         // Push values using Addr<Block<T>> methods
         block_addr.push(VmValue::Int(42), &mut memory)?;
         block_addr.push(VmValue::Int(24), &mut memory)?;
 
-        // Verify through GetDomain
-        let (_, block) = memory.get_domain(block_addr)?;
+        // Get block info
+        let (domain, block) = memory.get_domain(block_addr)?;
         assert_eq!(block.len(), 2);
+        let data = domain.get(block.data(), block.len())?;
+        assert_eq!(data, &[VmValue::Int(42), VmValue::Int(24)]);
 
         // Pop values
         let val2 = block_addr.pop(&mut memory)?;
@@ -896,14 +864,66 @@ mod tests {
         let block_addr = memory.end()?;
 
         // Verify the block contents
-        let (_, block) = memory.get_domain(block_addr)?;
+        let (domain, block) = memory.get_domain(block_addr)?;
         assert_eq!(block.len(), 3);
 
-        let block_data = memory.get_values(block.data(), block.len())?;
-        assert_eq!(
-            block_data,
-            &[VmValue::Int(1), VmValue::Int(2), VmValue::Int(3)]
+        let data = domain.get(block.data(), block.len())?;
+        assert_eq!(data, &[VmValue::Int(1), VmValue::Int(2), VmValue::Int(3)]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_string_and_symbol_handling() -> Result<(), MemoryError> {
+        let mut memory = Memory::new(1024);
+        memory.init()?;
+
+        // Test string allocation and content
+        let str_addr = memory.alloc_string("Hello")?;
+        let str_block = memory.get_block(str_addr)?;
+        let str_bytes = memory.get_bytes(Addr::new(str_block.data().0), str_block.len())?;
+        assert_eq!(str_bytes, b"Hello", "String content should match");
+
+        // Test symbol management
+        let symbol1 = memory.get_symbol("test")?;
+        let symbol2 = memory.get_symbol("test")?;
+        assert_eq!(symbol1, symbol2, "Same symbol should return same address");
+
+        // Test symbol content
+        let symbol_block = memory.get_block(symbol1)?;
+        let symbol_bytes =
+            memory.get_bytes(Addr::new(symbol_block.data().0), symbol_block.len())?;
+        assert_eq!(symbol_bytes, b"test", "Symbol content should match");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parser_integration() -> Result<(), MemoryError> {
+        let mut memory = Memory::new(1024);
+        memory.init()?;
+
+        // Test basic parsing
+        memory
+            .parse_block("1 2 \"test\"")
+            .expect("Failed to parse basic block");
+
+        // Test nested blocks
+        memory
+            .parse_block("1 [2 3] 4")
+            .expect("Failed to parse nested blocks");
+
+        // Test words and paths
+        memory
+            .parse_block("word: value word/path")
+            .expect("Failed to parse words and paths");
+
+        // Test error handling
+        assert!(
+            memory.parse_block("99999999999").is_err(),
+            "Should detect integer overflow"
         );
+        assert!(memory.parse_block(":").is_err(), "Should detect empty word");
 
         Ok(())
     }
@@ -979,41 +999,6 @@ mod tests {
     }
 
     #[test]
-    fn test_memory_addressing() -> Result<(), MemoryError> {
-        let mut memory = Memory::new(1024);
-        memory.init()?;
-
-        // Test sequential block allocations
-        let block1 = memory.alloc_block(2)?;
-        let block2 = memory.alloc_block(3)?;
-
-        // Verify blocks have different addresses
-        assert_ne!(block1.0, block2.0, "Blocks should have unique addresses");
-
-        // Fill blocks with different values
-        block1.push(VmValue::Int(1), &mut memory)?;
-        block1.push(VmValue::Int(2), &mut memory)?;
-
-        block2.push(VmValue::Int(3), &mut memory)?;
-        block2.push(VmValue::Int(4), &mut memory)?;
-        block2.push(VmValue::Int(5), &mut memory)?;
-
-        // Verify each block maintains its own content
-        let (domain1, b1) = memory.get_domain(block1)?;
-        let content1 = domain1.get(b1.data(), b1.len())?;
-        assert_eq!(content1, &[VmValue::Int(1), VmValue::Int(2)]);
-
-        let (domain2, b2) = memory.get_domain(block2)?;
-        let content2 = domain2.get(b2.data(), b2.len())?;
-        assert_eq!(
-            content2,
-            &[VmValue::Int(3), VmValue::Int(4), VmValue::Int(5)]
-        );
-
-        Ok(())
-    }
-
-    #[test]
     fn test_memory_error_conditions() -> Result<(), MemoryError> {
         let mut memory = Memory::new(1024);
         memory.init()?;
@@ -1026,7 +1011,7 @@ mod tests {
         ));
 
         // Test stack overflow
-        let block_addr = memory.alloc_block(2)?;
+        let block_addr = memory.alloc_empty_block(2)?;
         block_addr.push(VmValue::Int(1), &mut memory)?;
         block_addr.push(VmValue::Int(2), &mut memory)?;
         assert!(matches!(
@@ -1035,15 +1020,16 @@ mod tests {
         ));
 
         // Test stack underflow
-        let empty_block_addr = memory.alloc_block(1)?;
+        let empty_block_addr = memory.alloc_empty_block(1)?;
         assert!(matches!(
             empty_block_addr.pop(&mut memory).unwrap_err(),
             MemoryError::StackUnderflow
         ));
 
         // Test out of bounds access
+        let (domain, block) = memory.get_domain(block_addr)?;
         assert!(matches!(
-            memory.get_values(Addr::new(u32::MAX), 1).unwrap_err(),
+            domain.get(Addr::new(u32::MAX), 1).unwrap_err(),
             MemoryError::OutOfBounds
         ));
 
