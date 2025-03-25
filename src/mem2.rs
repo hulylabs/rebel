@@ -48,9 +48,9 @@ where
         }
     }
 
-    pub fn prev(self) -> Option<Self> {
-        self.0.checked_sub(1).map(Self::new)
-    }
+    // pub fn prev(self) -> Option<Self> {
+    //     self.0.checked_sub(1).map(Self::new)
+    // }
 
     pub fn next(self, n: Word) -> Result<Self, MemoryError> {
         self.0
@@ -62,9 +62,17 @@ where
     pub fn verify(self, cap: Word) -> bool {
         self.0 < cap
     }
+
+    pub fn capped_next(self, n: Word, cap: Word) -> Result<Self, MemoryError> {
+        self.0
+            .checked_add(n)
+            .filter(|&next| next < cap)
+            .map(Self::new)
+            .ok_or(MemoryError::OutOfBounds)
+    }
 }
 
-/// This is actually Block API users intended to use
+/// This is The Block API users intended to use
 impl<'a, T> Addr<Block<T>>
 where
     T: Default + Copy,
@@ -91,6 +99,22 @@ where
     {
         let (domain, block) = memory.get_domain(Addr::new(self.0))?;
         block.get_all(domain)
+    }
+
+    pub fn get<'d, D>(&self, index: Word, memory: &'d D) -> Result<T, MemoryError>
+    where
+        D: GetDomain<'a, T>,
+    {
+        let (domain, block) = memory.get_domain(Addr::new(self.0))?;
+        block.get(index, domain)
+    }
+
+    pub fn set<'d, D>(&self, index: Word, value: &T, memory: &'d mut D) -> Result<(), MemoryError>
+    where
+        D: GetDomain<'a, T>,
+    {
+        let (domain, block) = memory.get_domain_mut(Addr::new(self.0))?;
+        block.set(index, value, domain)
     }
 }
 
@@ -188,6 +212,18 @@ where
 
     fn get_all<'a>(&self, domain: &'a Domain<T>) -> Result<&'a [T], MemoryError> {
         domain.get(self.data(), self.0.len)
+    }
+
+    fn get(&self, index: Word, domain: &Domain<T>) -> Result<T, MemoryError> {
+        domain
+            .get_item(self.data().capped_next(index, self.0.len)?)
+            .copied()
+    }
+
+    fn set(&self, index: Word, value: &T, domain: &mut Domain<T>) -> Result<(), MemoryError> {
+        domain
+            .get_item_mut(self.data().capped_next(index, self.0.len)?)
+            .map(|slot| *slot = *value)
     }
 }
 
