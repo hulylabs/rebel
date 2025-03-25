@@ -10,6 +10,10 @@ use thiserror::Error;
 pub enum MemoryError {
     #[error("out of bounds access")]
     OutOfBounds,
+    #[error("stack underflow")]
+    StackUnderflow,
+    #[error("stack overflow")]
+    StackOverflow,
 }
 
 pub type Word = u32;
@@ -57,12 +61,8 @@ where
             .ok_or(MemoryError::OutOfBounds)
     }
 
-    pub fn verify(self, cap: Word) -> Result<Self, MemoryError> {
-        if self.0 < cap {
-            Ok(self)
-        } else {
-            Err(MemoryError::OutOfBounds)
-        }
+    pub fn verify(self, cap: Word) -> bool {
+        self.0 >= cap
     }
 }
 
@@ -123,6 +123,26 @@ where
     /// Returns the data address of the block
     pub fn data(&self) -> Addr<T> {
         self.data
+    }
+
+    pub fn push(&mut self, item: T, domain: &mut Domain<T>) -> Result<(), MemoryError> {
+        let index = self.data.next(self.len)?;
+        if index.verify(self.cap) {
+            return Err(MemoryError::StackOverflow);
+        }
+        domain.get_item_mut(index).map(|slot| {
+            *slot = item;
+            self.len += 1
+        })
+    }
+
+    pub fn pop(&mut self, domain: &mut Domain<T>) -> Result<T, MemoryError> {
+        self.len = self.len.checked_sub(1).ok_or(MemoryError::StackUnderflow)?;
+        let index = self.data.next(self.len)?;
+        if index.verify(self.cap) {
+            return Err(MemoryError::StackOverflow);
+        }
+        domain.get_item(index).copied()
     }
 }
 
@@ -444,6 +464,19 @@ impl Memory {
 
     pub fn get_op_stack_mut(&mut self) -> &mut Block<Word> {
         &mut self.op_stack
+    }
+
+    pub fn begin(&mut self) -> Result<(), MemoryError> {
+        self.op_stack.push(self.stack.len(), &mut self.words)
+    }
+
+    pub fn end(&mut self) -> Result<Addr<Block<VmValue>>, MemoryError> {
+        let offset = self.op_stack.pop(&mut self.words)?;
+        let from = self.stack.data.next(offset)?;
+        let items = self.stack.len() - offset;
+        let to = self.values.alloc(items)?;
+        self.values.copy_items(from, to, items)?;
+        self.blocks.push(Block::new(items, items, to))
     }
 }
 
