@@ -1,10 +1,9 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
 use smol_str::SmolStr;
-use std::any::Any;
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::ops::{Add, Range};
+use std::ops::Range;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -48,11 +47,8 @@ where
         }
     }
 
-    pub fn prev(self, n: Word) -> Result<Self, MemoryError> {
-        self.0
-            .checked_sub(n)
-            .map(Self::new)
-            .ok_or(MemoryError::OutOfBounds)
+    pub fn prev(self) -> Option<Self> {
+        self.0.checked_sub(1).map(Self::new)
     }
 
     pub fn next(self, n: Word) -> Result<Self, MemoryError> {
@@ -76,16 +72,7 @@ where
         D: GetDomain<'a, T>,
     {
         let (domain, block) = memory.get_domain_mut(Addr::new(self.0))?;
-        // let block = memory.blocks.get_item_mut(Addr::new(self.0))?;
-        let data = Addr::new(block.data);
-        let index = data.next(block.len)?;
-        if index.verify(block.cap) {
-            return Err(MemoryError::StackOverflow);
-        };
-        let slot = domain.get_item_mut(index)?;
-        *slot = item;
-        block.len += 1;
-        Ok(())
+        block.push(item, domain)
     }
 
     pub fn pop<D>(&self, memory: &mut D) -> Result<T, MemoryError>
@@ -93,14 +80,7 @@ where
         D: GetDomain<'a, T>,
     {
         let (domain, block) = memory.get_domain_mut(Addr::new(self.0))?;
-        let new_len = block
-            .len
-            .checked_sub(1)
-            .ok_or(MemoryError::StackUnderflow)?;
-        let data = Addr::new(block.data);
-        let index = data.next(new_len)?;
-        block.len = new_len;
-        domain.get_item(index).copied()
+        block.pop(domain)
     }
 }
 
@@ -134,12 +114,6 @@ struct AnyBlock {
     data: Word,
 }
 
-impl AnyBlock {
-    fn new(cap: Word, len: Word, data: Word) -> Self {
-        Self { cap, len, data }
-    }
-}
-
 impl Default for AnyBlock {
     fn default() -> Self {
         Self {
@@ -151,7 +125,7 @@ impl Default for AnyBlock {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Block<T>(AnyBlock, PhantomData<T>);
+struct Block<T>(AnyBlock, PhantomData<T>);
 
 impl<T> Block<T>
 where
@@ -174,37 +148,32 @@ where
     }
 
     /// Returns the capacity of the block
-    pub fn capacity(&self) -> Word {
+    pub fn cap(&self) -> Word {
         self.0.cap
     }
 
-    /// Returns the data address of the block
-    pub fn data(&self) -> Addr<T> {
+    fn data(&self) -> Addr<T> {
         Addr::new(self.0.data)
     }
 
     pub fn push(&mut self, item: T, domain: &mut Domain<T>) -> Result<(), MemoryError> {
-        let data = Addr::new(self.0.data);
-        let index = data.next(self.0.len)?;
+        let index = self.data().next(self.0.len)?;
         if index.verify(self.0.cap) {
-            return Err(MemoryError::StackOverflow);
-        };
-        let slot = domain.get_item_mut(index)?;
-        *slot = item;
-        self.0.len += 1;
-        Ok(())
+            Err(MemoryError::StackOverflow)
+        } else {
+            domain.get_item_mut(index).map(|slot| *slot = item)?;
+            self.0.len += 1;
+            Ok(())
+        }
     }
 
     pub fn pop(&mut self, domain: &mut Domain<T>) -> Result<T, MemoryError> {
-        let new_len = self
+        self.0.len = self
             .0
             .len
             .checked_sub(1)
             .ok_or(MemoryError::StackUnderflow)?;
-        let data = Addr::new(self.0.data);
-        let index = data.next(new_len)?;
-        self.0.len = new_len;
-        domain.get_item(index).copied()
+        domain.get_item(self.data().next(self.0.len)?).copied()
     }
 }
 
@@ -377,11 +346,11 @@ where
 }
 
 pub trait GetDomain<'a, T> {
-    fn get_domain(&self, addr: Addr<AnyBlock>) -> Result<(&Domain<T>, &AnyBlock), MemoryError>;
+    fn get_domain(&self, addr: Addr<Block<T>>) -> Result<(&Domain<T>, &Block<T>), MemoryError>;
     fn get_domain_mut(
         &mut self,
-        addr: Addr<AnyBlock>,
-    ) -> Result<(&mut Domain<T>, &mut AnyBlock), MemoryError>;
+        addr: Addr<Block<T>>,
+    ) -> Result<(&mut Domain<T>, &mut Block<T>), MemoryError>;
 }
 
 //
@@ -399,8 +368,8 @@ pub struct Memory {
     symbols: HashMap<SmolStr, Addr<Block<u8>>>,
     system: HashMap<Addr<Block<u8>>, VmValue>,
     //
-    stack: Addr<Block<VmValue>>,
-    op_stack: Addr<Block<Word>>,
+    stack: Block<VmValue>,
+    op_stack: Block<Word>,
 }
 
 // Public accessor methods for Memory
@@ -419,8 +388,8 @@ impl Memory {
             symbols: HashMap::new(),
             system: HashMap::new(),
             //
-            stack: Addr::new(0),
-            op_stack: Addr::new(0),
+            stack: Block::default(),
+            op_stack: Block::default(),
         }
     }
 
@@ -428,10 +397,10 @@ impl Memory {
         // let stack_space = self.values.alloc(256)?;
         // self.stack = Block::new(256, 0, stack_space);
 
-        self.stack = self.alloc_block(256)?;
+        // self.stack = self.alloc_block(256)?;
 
-        let op_stack_space = self.words.alloc(256)?;
-        self.blocks.push(AnyBlock::new(256, 0, op_stack_space.0));
+        // let op_stack_space = self.words.alloc(256)?;
+        // self.blocks.push(AnyBlock::new(256, 0, op_stack_space.0));
 
         Ok(())
     }
@@ -469,11 +438,21 @@ impl Memory {
     //     self.contexts.get_item_mut(addr)
     // }
 
+    fn alloc_block_header<T>(
+        &mut self,
+        cap: Word,
+        len: Word,
+        data: Word,
+    ) -> Result<Addr<Block<T>>, MemoryError>
+    where
+        T: Default + Copy,
+    {
+        Ok(Addr::new(self.blocks.push(AnyBlock { cap, len, data })?.0))
+    }
+
     pub fn alloc_block(&mut self, cap: Word) -> Result<Addr<Block<VmValue>>, MemoryError> {
         let data = self.values.alloc(cap)?;
-        let block = Block::new(cap, 0, data);
-        let addr = self.blocks.push(block.0)?;
-        Ok(Addr::new(addr.0))
+        self.alloc_block_header(cap, 0, data.0)
     }
 
     // pub fn alloc_string(&mut self, cap: Word) -> Result<Addr<Block<u8>>, MemoryError> {
@@ -520,45 +499,33 @@ impl Memory {
         self.pairs.get_mut(addr, len)
     }
 
-    // B L O C K S
-
-    // S T A C K S
-
-    pub fn get_stack(&self) -> Addr<Block<VmValue>> {
-        self.stack.clone()
-    }
-
-    pub fn get_stack_len(&self) -> Result<Word, MemoryError> {
-        Ok(self.blocks.get_item(Addr::new(self.stack.0))?.len)
-    }
-
-    pub fn get_op_stack(&self) -> Addr<Block<Word>> {
-        self.op_stack.clone()
-    }
-
     // P A R S E R  S U P P O R T
 
     pub fn begin(&mut self) -> Result<(), MemoryError> {
-        self.get_op_stack().push(self.get_stack_len()?, self)?;
-        Ok(())
+        self.op_stack.push(self.stack.len(), &mut self.words)
     }
 
     pub fn end(&mut self) -> Result<Addr<Block<VmValue>>, MemoryError> {
-        let offset = self.op_stack.pop(self)?;
-        let from = self.stack.data.next(offset)?;
-        let items = self.stack.len() - offset;
+        let offset = self.op_stack.pop(&mut self.words)?;
+        let from = self.stack.data().next(offset)?;
+        let items = self
+            .stack
+            .len()
+            .checked_sub(offset)
+            .ok_or(MemoryError::OutOfBounds)?;
         let to = self.values.alloc(items)?;
         self.values.copy_items(from, to, items)?;
-        self.blocks.push(Block::new(items, items, to))
+        self.alloc_block_header(items, items, to.0)
     }
 }
 
 impl<'a> GetDomain<'a, VmValue> for Memory {
     fn get_domain(
         &self,
-        addr: Addr<AnyBlock>,
-    ) -> Result<(&Domain<VmValue>, &AnyBlock), MemoryError> {
-        Ok((&self.values, self.blocks.get_item(addr)?))
+        addr: Addr<Block<VmValue>>,
+    ) -> Result<(&Domain<VmValue>, &Block<VmValue>), MemoryError> {
+        let x = self.blocks.get_item(Addr::new(addr.0))?;
+        Ok((&self.values,))
     }
 
     fn get_domain_mut(
