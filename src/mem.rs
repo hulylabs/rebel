@@ -81,48 +81,54 @@ where
     where
         D: BlockStorage<'a, T>,
     {
-        let (block, domain) = memory.access_block_mut(Addr::new(self.0))?;
-        block.push(item, domain)
+        memory
+            .access_block_mut(Addr::new(self.0))
+            .and_then(|(block, domain)| block.push(item, domain))
     }
-    
+
     pub fn push_all<D>(&self, items: &[T], memory: &mut D) -> Result<(), MemoryError>
     where
         D: BlockStorage<'a, T>,
     {
-        let (block, domain) = memory.access_block_mut(Addr::new(self.0))?;
-        block.push_all(items, domain)
+        memory
+            .access_block_mut(Addr::new(self.0))
+            .and_then(|(block, domain)| block.push_all(items, domain))
     }
 
     pub fn pop<D>(&self, memory: &mut D) -> Result<T, MemoryError>
     where
         D: BlockStorage<'a, T>,
     {
-        let (block, domain) = memory.access_block_mut(Addr::new(self.0))?;
-        block.pop(domain)
+        memory
+            .access_block_mut(Addr::new(self.0))
+            .and_then(|(block, domain)| block.pop(domain))
     }
 
     pub fn get_all<'d, D>(&self, memory: &'d D) -> Result<&'d [T], MemoryError>
     where
         D: BlockStorage<'a, T>,
     {
-        let (block, domain) = memory.access_block(Addr::new(self.0))?;
-        block.get_all(domain)
+        memory
+            .access_block(Addr::new(self.0))
+            .and_then(|(block, domain)| block.get_all(domain))
     }
 
     pub fn get<'d, D>(&self, index: Word, memory: &'d D) -> Result<T, MemoryError>
     where
         D: BlockStorage<'a, T>,
     {
-        let (block, domain) = memory.access_block(Addr::new(self.0))?;
-        block.get(index, domain)
+        memory
+            .access_block(Addr::new(self.0))
+            .and_then(|(block, domain)| block.get(index, domain))
     }
 
     pub fn set<'d, D>(&self, index: Word, value: &T, memory: &'d mut D) -> Result<(), MemoryError>
     where
         D: BlockStorage<'a, T>,
     {
-        let (block, domain) = memory.access_block_mut(Addr::new(self.0))?;
-        block.set(index, value, domain)
+        memory
+            .access_block_mut(Addr::new(self.0))
+            .and_then(|(block, domain)| block.set(index, value, domain))
     }
 }
 
@@ -208,20 +214,19 @@ where
             Err(MemoryError::StackOverflow)
         }
     }
-    
+
     fn push_all(&mut self, items: &[T], domain: &mut Domain<T>) -> Result<(), MemoryError> {
         let items_len = items.len() as Word;
         if self.0.len + items_len > self.0.cap {
             return Err(MemoryError::StackOverflow);
         }
-        
+
         if items_len > 0 {
             let dest_addr = self.data().next(self.0.len)?;
-            domain.get_mut(dest_addr, items_len)?
-                  .copy_from_slice(items);
+            domain.get_mut(dest_addr, items_len)?.copy_from_slice(items);
             self.0.len += items_len;
         }
-        
+
         Ok(())
     }
 
@@ -637,7 +642,10 @@ impl<'a> BlockStorage<'a, Word> for Memory {
 }
 
 impl<'a> BlockStorage<'a, u8> for Memory {
-    fn access_block(&self, addr: Addr<Block<u8>>) -> Result<(&Block<u8>, &Domain<u8>), MemoryError> {
+    fn access_block(
+        &self,
+        addr: Addr<Block<u8>>,
+    ) -> Result<(&Block<u8>, &Domain<u8>), MemoryError> {
         let typeless = self.blocks.get_item(Addr::new(addr.0))?;
         let ptr = typeless as *const AnyBlock;
         let block = unsafe { &*ptr.cast::<Block<u8>>() };
@@ -654,4 +662,3 @@ impl<'a> BlockStorage<'a, u8> for Memory {
         Ok((block, &mut self.bytes))
     }
 }
-
