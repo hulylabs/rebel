@@ -79,49 +79,49 @@ where
 {
     pub fn push<D>(&self, item: T, memory: &mut D) -> Result<(), MemoryError>
     where
-        D: GetDomain<'a, T>,
+        D: BlockStorage<'a, T>,
     {
-        let (domain, block) = memory.get_domain_mut(Addr::new(self.0))?;
+        let (block, domain) = memory.access_block_mut(Addr::new(self.0))?;
         block.push(item, domain)
     }
     
     pub fn push_all<D>(&self, items: &[T], memory: &mut D) -> Result<(), MemoryError>
     where
-        D: GetDomain<'a, T>,
+        D: BlockStorage<'a, T>,
     {
-        let (domain, block) = memory.get_domain_mut(Addr::new(self.0))?;
+        let (block, domain) = memory.access_block_mut(Addr::new(self.0))?;
         block.push_all(items, domain)
     }
 
     pub fn pop<D>(&self, memory: &mut D) -> Result<T, MemoryError>
     where
-        D: GetDomain<'a, T>,
+        D: BlockStorage<'a, T>,
     {
-        let (domain, block) = memory.get_domain_mut(Addr::new(self.0))?;
+        let (block, domain) = memory.access_block_mut(Addr::new(self.0))?;
         block.pop(domain)
     }
 
     pub fn get_all<'d, D>(&self, memory: &'d D) -> Result<&'d [T], MemoryError>
     where
-        D: GetDomain<'a, T>,
+        D: BlockStorage<'a, T>,
     {
-        let (domain, block) = memory.get_domain(Addr::new(self.0))?;
+        let (block, domain) = memory.access_block(Addr::new(self.0))?;
         block.get_all(domain)
     }
 
     pub fn get<'d, D>(&self, index: Word, memory: &'d D) -> Result<T, MemoryError>
     where
-        D: GetDomain<'a, T>,
+        D: BlockStorage<'a, T>,
     {
-        let (domain, block) = memory.get_domain(Addr::new(self.0))?;
+        let (block, domain) = memory.access_block(Addr::new(self.0))?;
         block.get(index, domain)
     }
 
     pub fn set<'d, D>(&self, index: Word, value: &T, memory: &'d mut D) -> Result<(), MemoryError>
     where
-        D: GetDomain<'a, T>,
+        D: BlockStorage<'a, T>,
     {
-        let (domain, block) = memory.get_domain_mut(Addr::new(self.0))?;
+        let (block, domain) = memory.access_block_mut(Addr::new(self.0))?;
         block.set(index, value, domain)
     }
 }
@@ -420,12 +420,12 @@ where
     }
 }
 
-pub trait GetDomain<'a, T> {
-    fn get_domain(&self, addr: Addr<Block<T>>) -> Result<(&Domain<T>, &Block<T>), MemoryError>;
-    fn get_domain_mut(
+pub trait BlockStorage<'a, T> {
+    fn access_block(&self, addr: Addr<Block<T>>) -> Result<(&Block<T>, &Domain<T>), MemoryError>;
+    fn access_block_mut(
         &mut self,
         addr: Addr<Block<T>>,
-    ) -> Result<(&mut Domain<T>, &mut Block<T>), MemoryError>;
+    ) -> Result<(&mut Block<T>, &mut Domain<T>), MemoryError>;
 }
 
 //
@@ -592,66 +592,66 @@ impl Collector for Memory {
 
 // D O M A I N  S U P P O R T
 
-impl<'a> GetDomain<'a, VmValue> for Memory {
-    fn get_domain(
+impl<'a> BlockStorage<'a, VmValue> for Memory {
+    fn access_block(
         &self,
         addr: Addr<Block<VmValue>>,
-    ) -> Result<(&Domain<VmValue>, &Block<VmValue>), MemoryError> {
+    ) -> Result<(&Block<VmValue>, &Domain<VmValue>), MemoryError> {
         let typeless = self.blocks.get_item(Addr::new(addr.0))?;
         let ptr = typeless as *const AnyBlock;
         let block = unsafe { &*ptr.cast::<Block<VmValue>>() };
-        Ok((&self.values, block))
+        Ok((block, &self.values))
     }
 
-    fn get_domain_mut(
+    fn access_block_mut(
         &mut self,
         addr: Addr<Block<VmValue>>,
-    ) -> Result<(&mut Domain<VmValue>, &mut Block<VmValue>), MemoryError> {
+    ) -> Result<(&mut Block<VmValue>, &mut Domain<VmValue>), MemoryError> {
         let typeless = self.blocks.get_item_mut(Addr::new(addr.0))?;
         let ptr = typeless as *mut AnyBlock;
         let block = unsafe { &mut *ptr.cast::<Block<VmValue>>() };
-        Ok((&mut self.values, block))
+        Ok((block, &mut self.values))
     }
 }
 
-impl<'a> GetDomain<'a, Word> for Memory {
-    fn get_domain(
+impl<'a> BlockStorage<'a, Word> for Memory {
+    fn access_block(
         &self,
         addr: Addr<Block<Word>>,
-    ) -> Result<(&Domain<Word>, &Block<Word>), MemoryError> {
+    ) -> Result<(&Block<Word>, &Domain<Word>), MemoryError> {
         let typeless = self.blocks.get_item(Addr::new(addr.0))?;
         let ptr = typeless as *const AnyBlock;
         let block = unsafe { &*ptr.cast::<Block<Word>>() };
-        Ok((&self.words, block))
+        Ok((block, &self.words))
     }
 
-    fn get_domain_mut(
+    fn access_block_mut(
         &mut self,
         addr: Addr<Block<Word>>,
-    ) -> Result<(&mut Domain<Word>, &mut Block<Word>), MemoryError> {
+    ) -> Result<(&mut Block<Word>, &mut Domain<Word>), MemoryError> {
         let typeless = self.blocks.get_item_mut(Addr::new(addr.0))?;
         let ptr = typeless as *mut AnyBlock;
         let block = unsafe { &mut *ptr.cast::<Block<Word>>() };
-        Ok((&mut self.words, block))
+        Ok((block, &mut self.words))
     }
 }
 
-impl<'a> GetDomain<'a, u8> for Memory {
-    fn get_domain(&self, addr: Addr<Block<u8>>) -> Result<(&Domain<u8>, &Block<u8>), MemoryError> {
+impl<'a> BlockStorage<'a, u8> for Memory {
+    fn access_block(&self, addr: Addr<Block<u8>>) -> Result<(&Block<u8>, &Domain<u8>), MemoryError> {
         let typeless = self.blocks.get_item(Addr::new(addr.0))?;
         let ptr = typeless as *const AnyBlock;
         let block = unsafe { &*ptr.cast::<Block<u8>>() };
-        Ok((&self.bytes, block))
+        Ok((block, &self.bytes))
     }
 
-    fn get_domain_mut(
+    fn access_block_mut(
         &mut self,
         addr: Addr<Block<u8>>,
-    ) -> Result<(&mut Domain<u8>, &mut Block<u8>), MemoryError> {
+    ) -> Result<(&mut Block<u8>, &mut Domain<u8>), MemoryError> {
         let typeless = self.blocks.get_item_mut(Addr::new(addr.0))?;
         let ptr = typeless as *mut AnyBlock;
         let block = unsafe { &mut *ptr.cast::<Block<u8>>() };
-        Ok((&mut self.bytes, block))
+        Ok((block, &mut self.bytes))
     }
 }
 
