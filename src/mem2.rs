@@ -125,7 +125,7 @@ impl Default for AnyBlock {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Block<T>(AnyBlock, PhantomData<T>);
+pub struct Block<T>(AnyBlock, PhantomData<T>);
 
 impl<T> Block<T>
 where
@@ -524,28 +524,42 @@ impl<'a> GetDomain<'a, VmValue> for Memory {
         &self,
         addr: Addr<Block<VmValue>>,
     ) -> Result<(&Domain<VmValue>, &Block<VmValue>), MemoryError> {
-        let x = self.blocks.get_item(Addr::new(addr.0))?;
-        Ok((&self.values,))
+        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
+        let ptr = typeless as *const AnyBlock;
+        let block = unsafe { &*ptr.cast::<Block<VmValue>>() };
+        Ok((&self.values, block))
     }
 
     fn get_domain_mut(
         &mut self,
-        addr: Addr<AnyBlock>,
-    ) -> Result<(&mut Domain<VmValue>, &mut AnyBlock), MemoryError> {
-        Ok((&mut self.values, self.blocks.get_item_mut(addr)?))
+        addr: Addr<Block<VmValue>>,
+    ) -> Result<(&mut Domain<VmValue>, &mut Block<VmValue>), MemoryError> {
+        let typeless = self.blocks.get_item_mut(Addr::new(addr.0))?;
+        let ptr = typeless as *mut AnyBlock;
+        let block = unsafe { &mut *ptr.cast::<Block<VmValue>>() };
+        Ok((&mut self.values, block))
     }
 }
 
 impl<'a> GetDomain<'a, Word> for Memory {
-    fn get_domain(&self, addr: Addr<AnyBlock>) -> Result<(&Domain<Word>, &AnyBlock), MemoryError> {
-        Ok((&self.words, self.blocks.get_item(addr)?))
+    fn get_domain(
+        &self,
+        addr: Addr<Block<Word>>,
+    ) -> Result<(&Domain<Word>, &Block<Word>), MemoryError> {
+        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
+        let ptr = typeless as *const AnyBlock;
+        let block = unsafe { &*ptr.cast::<Block<Word>>() };
+        Ok((&self.words, block))
     }
 
     fn get_domain_mut(
         &mut self,
-        addr: Addr<AnyBlock>,
-    ) -> Result<(&mut Domain<Word>, &mut AnyBlock), MemoryError> {
-        Ok((&mut self.words, self.blocks.get_item_mut(addr)?))
+        addr: Addr<Block<Word>>,
+    ) -> Result<(&mut Domain<Word>, &mut Block<Word>), MemoryError> {
+        let typeless = self.blocks.get_item_mut(Addr::new(addr.0))?;
+        let ptr = typeless as *mut AnyBlock;
+        let block = unsafe { &mut *ptr.cast::<Block<Word>>() };
+        Ok((&mut self.words, block))
     }
 }
 
