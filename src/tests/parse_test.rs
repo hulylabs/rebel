@@ -291,6 +291,10 @@ mod tests {
         // Integer overflow (if we try to parse a number larger than i32::MAX)
         let result = parse("[99999999999]");
         assert!(matches!(result, Err(ParserError::IntegerOverflow)));
+
+        // Numbers must be followed by whitespace or closing bracket
+        let result = parse("[12abc]");
+        assert!(matches!(result, Err(ParserError::UnexpectedChar('a'))));
     }
 
     // Static parse methods test from parser.rs

@@ -335,7 +335,12 @@ where
                     consumed = Some(char);
                     break;
                 }
-                _ => break,
+                c if c.is_ascii_whitespace() => {
+                    break;
+                }
+                _ => {
+                    return Err(ParserError::UnexpectedChar(char));
+                }
             }
         }
         if !has_digits {
