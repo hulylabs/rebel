@@ -13,44 +13,44 @@ pub struct SimpleCollector {
 impl Collector for SimpleCollector {
     type Error = ();
 
-    fn string(&mut self, string: &str) -> Option<()> {
+    fn string(&mut self, string: &str) -> Result<(), Self::Error> {
         self.tokens.push(format!("String: {}", string));
-        Some(())
+        Ok(())
     }
 
-    fn word(&mut self, kind: WordKind, word: &str) -> Option<()> {
+    fn word(&mut self, kind: WordKind, word: &str) -> Result<(), Self::Error> {
         let kind_str = match kind {
             WordKind::Word => "Word",
             WordKind::SetWord => "SetWord",
             WordKind::GetWord => "GetWord",
         };
         self.tokens.push(format!("{}: {}", kind_str, word));
-        Some(())
+        Ok(())
     }
 
-    fn integer(&mut self, value: i32) -> Option<()> {
+    fn integer(&mut self, value: i32) -> Result<(), Self::Error> {
         self.tokens.push(format!("Integer: {}", value));
-        Some(())
+        Ok(())
     }
 
-    fn begin_block(&mut self) -> Option<()> {
+    fn begin_block(&mut self) -> Result<(), Self::Error> {
         self.tokens.push("BeginBlock".to_string());
-        Some(())
+        Ok(())
     }
 
-    fn end_block(&mut self) -> Option<()> {
+    fn end_block(&mut self) -> Result<(), Self::Error> {
         self.tokens.push("EndBlock".to_string());
-        Some(())
+        Ok(())
     }
 
-    fn begin_path(&mut self) -> Option<()> {
+    fn begin_path(&mut self) -> Result<(), Self::Error> {
         self.tokens.push("BeginPath".to_string());
-        Some(())
+        Ok(())
     }
 
-    fn end_path(&mut self) -> Option<()> {
+    fn end_path(&mut self) -> Result<(), Self::Error> {
         self.tokens.push("EndPath".to_string());
-        Some(())
+        Ok(())
     }
 }
 
@@ -59,7 +59,7 @@ mod tests {
     use super::*;
 
     // Helper function to create a parser and run the parse operation
-    fn parse(input: &str) -> Result<SimpleCollector, ParserError> {
+    fn parse(input: &str) -> Result<SimpleCollector, ParserError<()>> {
         let mut collector = SimpleCollector::default();
         Parser::parse(input, &mut collector)?;
         Ok(collector)

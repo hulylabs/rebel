@@ -1,5 +1,6 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
+use crate::parse::{Collector, Parser, ParserError, WordKind};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -406,21 +407,26 @@ impl Memory {
         Ok(Addr::new(self.blocks.push(AnyBlock { cap, len, data })?.0))
     }
 
-    pub fn alloc_block(&mut self, cap: Word) -> Result<Addr<Block<VmValue>>, MemoryError> {
+    pub fn alloc_empty_block(&mut self, cap: Word) -> Result<Addr<Block<VmValue>>, MemoryError> {
         let data = self.values.alloc(cap)?;
         self.alloc_block_header(cap, 0, data.0)
     }
 
-    pub fn get_values(&self, addr: Addr<VmValue>, len: Word) -> Result<&[VmValue], MemoryError> {
-        self.values.get(addr, len)
+    pub fn alloc_string(&mut self, string: &str) -> Result<Addr<Block<u8>>, MemoryError> {
+        let bytes = string.as_bytes();
+        let len = bytes.len() as Word;
+        let data = self.bytes.push_all(bytes)?;
+        self.alloc_block_header(len, len, data.0)
     }
 
-    pub fn get_values_mut(
-        &mut self,
-        addr: Addr<VmValue>,
-        len: Word,
-    ) -> Result<&mut [VmValue], MemoryError> {
-        self.values.get_mut(addr, len)
+    fn get_block<T>(&self, addr: Addr<Block<T>>) -> Result<&Block<T>, MemoryError>
+    where
+        T: Default + Copy,
+    {
+        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
+        let ptr = typeless as *const AnyBlock;
+        let block = unsafe { &*ptr.cast::<Block<T>>() };
+        Ok(block)
     }
 
     pub fn get_bytes(&self, addr: Addr<u8>, len: Word) -> Result<&[u8], MemoryError> {
@@ -443,6 +449,17 @@ impl Memory {
         self.pairs.get_mut(addr, len)
     }
 
+    pub fn get_symbol(&mut self, string: &str) -> Result<Addr<Block<u8>>, MemoryError> {
+        let symbol = self.symbols.get(string).copied();
+        if let Some(symbol) = symbol {
+            Ok(symbol)
+        } else {
+            let new_symbol = self.alloc_string(string)?;
+            self.symbols.insert(string.into(), new_symbol);
+            Ok(new_symbol)
+        }
+    }
+
     // P A R S E R  S U P P O R T
 
     pub fn begin(&mut self) -> Result<(), MemoryError> {
@@ -461,17 +478,63 @@ impl Memory {
         self.values.copy_items(from, to, items)?;
         self.alloc_block_header(items, items, to.0)
     }
+
+    pub fn parse(&mut self, input: &str) -> Result<(), ParserError<MemoryError>> {
+        Parser::parse(input, self)
+    }
 }
+
+// P A R S E  C O L L E C T O R
+
+impl Collector for Memory {
+    type Error = MemoryError;
+
+    fn string(&mut self, string: &str) -> Result<(), Self::Error> {
+        let string = VmValue::String(self.alloc_string(string)?);
+        self.stack.push(string, &mut self.values)
+    }
+
+    fn word(&mut self, kind: WordKind, word: &str) -> Result<(), Self::Error> {
+        let symbol = self.get_symbol(word)?;
+        let value = match kind {
+            WordKind::Word => VmValue::Word(symbol),
+            WordKind::SetWord => VmValue::SetWord(symbol),
+            WordKind::GetWord => VmValue::GetWord(symbol),
+        };
+        self.stack.push(value, &mut self.values)
+    }
+
+    fn integer(&mut self, value: i32) -> Result<(), Self::Error> {
+        self.stack.push(VmValue::Int(value), &mut self.values)
+    }
+
+    fn begin_block(&mut self) -> Result<(), Self::Error> {
+        self.begin()
+    }
+
+    fn end_block(&mut self) -> Result<(), Self::Error> {
+        let block = self.end().map(VmValue::Block)?;
+        self.stack.push(block, &mut self.values)
+    }
+
+    fn begin_path(&mut self) -> Result<(), Self::Error> {
+        self.begin()
+    }
+
+    fn end_path(&mut self) -> Result<(), Self::Error> {
+        let block = self.end().map(VmValue::Path)?;
+        self.stack.push(block, &mut self.values)
+    }
+}
+
+// D O M A I N  S U P P O R T
 
 impl<'a> GetDomain<'a, VmValue> for Memory {
     fn get_domain(
         &self,
         addr: Addr<Block<VmValue>>,
     ) -> Result<(&Domain<VmValue>, &Block<VmValue>), MemoryError> {
-        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
-        let ptr = typeless as *const AnyBlock;
-        let block = unsafe { &*ptr.cast::<Block<VmValue>>() };
-        Ok((&self.values, block))
+        Ok((&self.values, self.get_block(addr)?))
     }
 
     fn get_domain_mut(
@@ -490,10 +553,7 @@ impl<'a> GetDomain<'a, Word> for Memory {
         &self,
         addr: Addr<Block<Word>>,
     ) -> Result<(&Domain<Word>, &Block<Word>), MemoryError> {
-        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
-        let ptr = typeless as *const AnyBlock;
-        let block = unsafe { &*ptr.cast::<Block<Word>>() };
-        Ok((&self.words, block))
+        Ok((&self.words, self.get_block(addr)?))
     }
 
     fn get_domain_mut(
@@ -516,7 +576,7 @@ mod tests {
         memory: &mut Memory,
         values: &[VmValue],
     ) -> Result<Addr<Block<VmValue>>, MemoryError> {
-        let block_addr = memory.alloc_block(values.len() as Word)?;
+        let block_addr = memory.alloc_empty_block(values.len() as Word)?;
         let (domain, block) = memory.get_domain_mut(block_addr)?;
         for value in values {
             block.push(*value, domain)?;
