@@ -136,13 +136,13 @@ where
     /// # struct MyCollector;
     /// # impl Collector for MyCollector {
     /// #     type Error = ();
-    /// #     fn string(&mut self, _: &str) -> Option<()> { Some(()) }
-    /// #     fn word(&mut self, _: WordKind, _: &str) -> Option<()> { Some(()) }
-    /// #     fn integer(&mut self, _: i32) -> Option<()> { Some(()) }
-    /// #     fn begin_block(&mut self) -> Option<()> { Some(()) }
-    /// #     fn end_block(&mut self) -> Option<()> { Some(()) }
-    /// #     fn begin_path(&mut self) -> Option<()> { Some(()) }
-    /// #     fn end_path(&mut self) -> Option<()> { Some(()) }
+    /// #     fn string(&mut self, _: &str) -> Result<(), ()> { Ok(()) }
+    /// #     fn word(&mut self, _: WordKind, _: &str) -> Result<(), ()> { Ok(()) }
+    /// #     fn integer(&mut self, _: i32) -> Result<(), ()> { Ok(()) }
+    /// #     fn begin_block(&mut self) -> Result<(), ()> { Ok(()) }
+    /// #     fn end_block(&mut self) -> Result<(), ()> { Ok(()) }
+    /// #     fn begin_path(&mut self) -> Result<(), ()> { Ok(()) }
+    /// #     fn end_path(&mut self) -> Result<(), ()> { Ok(()) }
     /// # }
     /// # let mut collector = MyCollector;
     /// // Note: Input content isn't inside brackets, but will be treated as a block
@@ -179,13 +179,13 @@ where
     /// # struct MyCollector;
     /// # impl Collector for MyCollector {
     /// #     type Error = ();
-    /// #     fn string(&mut self, _: &str) -> Option<()> { Some(()) }
-    /// #     fn word(&mut self, _: WordKind, _: &str) -> Option<()> { Some(()) }
-    /// #     fn integer(&mut self, _: i32) -> Option<()> { Some(()) }
-    /// #     fn begin_block(&mut self) -> Option<()> { Some(()) }
-    /// #     fn end_block(&mut self) -> Option<()> { Some(()) }
-    /// #     fn begin_path(&mut self) -> Option<()> { Some(()) }
-    /// #     fn end_path(&mut self) -> Option<()> { Some(()) }
+    /// #     fn string(&mut self, _: &str) -> Result<(), ()> { Ok(()) }
+    /// #     fn word(&mut self, _: WordKind, _: &str) -> Result<(), ()> { Ok(()) }
+    /// #     fn integer(&mut self, _: i32) -> Result<(), ()> { Ok(()) }
+    /// #     fn begin_block(&mut self) -> Result<(), ()> { Ok(()) }
+    /// #     fn end_block(&mut self) -> Result<(), ()> { Ok(()) }
+    /// #     fn begin_path(&mut self) -> Result<(), ()> { Ok(()) }
+    /// #     fn end_path(&mut self) -> Result<(), ()> { Ok(()) }
     /// # }
     /// # let mut collector = MyCollector;
     /// let input = "[word 123 \"string\"]";

@@ -64,6 +64,7 @@ where
     }
 }
 
+/// This is actually Block API users intended to use
 impl<'a, T> Addr<Block<T>>
 where
     T: Default + Copy,
@@ -82,6 +83,14 @@ where
     {
         let (domain, block) = memory.get_domain_mut(Addr::new(self.0))?;
         block.pop(domain)
+    }
+
+    pub fn get_all<'d, D>(&self, memory: &'d D) -> Result<&'d [T], MemoryError>
+    where
+        D: GetDomain<'a, T>,
+    {
+        let (domain, block) = memory.get_domain(Addr::new(self.0))?;
+        block.get_all(domain)
     }
 }
 
@@ -157,7 +166,7 @@ where
         Addr::new(self.0.data)
     }
 
-    pub fn push(&mut self, item: T, domain: &mut Domain<T>) -> Result<(), MemoryError> {
+    fn push(&mut self, item: T, domain: &mut Domain<T>) -> Result<(), MemoryError> {
         if self.0.len < self.0.cap {
             let index = self.data().next(self.0.len)?;
             domain.get_item_mut(index).map(|slot| *slot = item)?;
@@ -168,13 +177,17 @@ where
         }
     }
 
-    pub fn pop(&mut self, domain: &mut Domain<T>) -> Result<T, MemoryError> {
+    fn pop(&mut self, domain: &mut Domain<T>) -> Result<T, MemoryError> {
         self.0.len = self
             .0
             .len
             .checked_sub(1)
             .ok_or(MemoryError::StackUnderflow)?;
         domain.get_item(self.data().next(self.0.len)?).copied()
+    }
+
+    fn get_all<'a>(&self, domain: &'a Domain<T>) -> Result<&'a [T], MemoryError> {
+        domain.get(self.data(), self.0.len)
     }
 }
 
@@ -419,16 +432,6 @@ impl Memory {
         self.alloc_block_header(len, len, data.0)
     }
 
-    fn get_block<T>(&self, addr: Addr<Block<T>>) -> Result<&Block<T>, MemoryError>
-    where
-        T: Default + Copy,
-    {
-        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
-        let ptr = typeless as *const AnyBlock;
-        let block = unsafe { &*ptr.cast::<Block<T>>() };
-        Ok(block)
-    }
-
     pub fn get_bytes(&self, addr: Addr<u8>, len: Word) -> Result<&[u8], MemoryError> {
         self.bytes.get(addr, len)
     }
@@ -534,7 +537,10 @@ impl<'a> GetDomain<'a, VmValue> for Memory {
         &self,
         addr: Addr<Block<VmValue>>,
     ) -> Result<(&Domain<VmValue>, &Block<VmValue>), MemoryError> {
-        Ok((&self.values, self.get_block(addr)?))
+        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
+        let ptr = typeless as *const AnyBlock;
+        let block = unsafe { &*ptr.cast::<Block<VmValue>>() };
+        Ok((&self.values, block))
     }
 
     fn get_domain_mut(
@@ -553,7 +559,10 @@ impl<'a> GetDomain<'a, Word> for Memory {
         &self,
         addr: Addr<Block<Word>>,
     ) -> Result<(&Domain<Word>, &Block<Word>), MemoryError> {
-        Ok((&self.words, self.get_block(addr)?))
+        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
+        let ptr = typeless as *const AnyBlock;
+        let block = unsafe { &*ptr.cast::<Block<Word>>() };
+        Ok((&self.words, block))
     }
 
     fn get_domain_mut(
@@ -564,6 +573,25 @@ impl<'a> GetDomain<'a, Word> for Memory {
         let ptr = typeless as *mut AnyBlock;
         let block = unsafe { &mut *ptr.cast::<Block<Word>>() };
         Ok((&mut self.words, block))
+    }
+}
+
+impl<'a> GetDomain<'a, u8> for Memory {
+    fn get_domain(&self, addr: Addr<Block<u8>>) -> Result<(&Domain<u8>, &Block<u8>), MemoryError> {
+        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
+        let ptr = typeless as *const AnyBlock;
+        let block = unsafe { &*ptr.cast::<Block<u8>>() };
+        Ok((&self.bytes, block))
+    }
+
+    fn get_domain_mut(
+        &mut self,
+        addr: Addr<Block<u8>>,
+    ) -> Result<(&mut Domain<u8>, &mut Block<u8>), MemoryError> {
+        let typeless = self.blocks.get_item_mut(Addr::new(addr.0))?;
+        let ptr = typeless as *mut AnyBlock;
+        let block = unsafe { &mut *ptr.cast::<Block<u8>>() };
+        Ok((&mut self.bytes, block))
     }
 }
 
@@ -880,8 +908,7 @@ mod tests {
 
         // Test string allocation and content
         let str_addr = memory.alloc_string("Hello")?;
-        let str_block = memory.get_block(str_addr)?;
-        let str_bytes = memory.get_bytes(Addr::new(str_block.data().0), str_block.len())?;
+        let str_bytes = str_addr.get_all(&memory)?;
         assert_eq!(str_bytes, b"Hello", "String content should match");
 
         // Test symbol management
@@ -890,9 +917,7 @@ mod tests {
         assert_eq!(symbol1, symbol2, "Same symbol should return same address");
 
         // Test symbol content
-        let symbol_block = memory.get_block(symbol1)?;
-        let symbol_bytes =
-            memory.get_bytes(Addr::new(symbol_block.data().0), symbol_block.len())?;
+        let symbol_bytes = symbol1.get_all(&memory)?;
         assert_eq!(symbol_bytes, b"test", "Symbol content should match");
 
         Ok(())
