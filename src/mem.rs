@@ -112,6 +112,15 @@ where
             .access_block(Addr::new(self.0))
             .and_then(|(block, domain)| block.get_all(domain))
     }
+    
+    pub fn peek<'d, D>(&self, memory: &'d D) -> Result<Option<T>, MemoryError>
+    where
+        D: BlockStorage<'a, T>,
+    {
+        memory
+            .access_block(Addr::new(self.0))
+            .and_then(|(block, domain)| block.peek(domain))
+    }
 
     pub fn get<'d, D>(&self, index: Word, memory: &'d D) -> Result<T, MemoryError>
     where
@@ -233,12 +242,22 @@ where
         Ok(())
     }
 
-    fn pop(&mut self, domain: &mut Domain<T>) -> Result<T, MemoryError> {
+    pub fn pop(&mut self, domain: &mut Domain<T>) -> Result<T, MemoryError> {
         self.0.len = self
             .len()
             .checked_sub(1)
             .ok_or(MemoryError::StackUnderflow)?;
         domain.get_item(self.data().next(self.0.len)?).copied()
+    }
+    
+    pub fn peek(&self, domain: &Domain<T>) -> Result<Option<T>, MemoryError> {
+        if self.is_empty() {
+            Ok(None)
+        } else {
+            domain
+                .get_item(self.data().next(self.0.len - 1)?)
+                .map(|item| Some(*item))
+        }
     }
 
     fn get_all<'a>(&self, domain: &'a Domain<T>) -> Result<&'a [T], MemoryError> {

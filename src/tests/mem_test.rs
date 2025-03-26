@@ -1,6 +1,6 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use crate::mem::{Addr, Block, BlockStorage, Domain, Memory, MemoryError, VmValue, Word};
+use crate::mem::{Addr, Block, Domain, Memory, MemoryError, VmValue, Word};
 
 #[cfg(test)]
 mod tests {
@@ -132,7 +132,7 @@ mod tests {
         let mut domain: Domain<i32> = Domain::new(5);
 
         // Test zero allocation
-        let addr0 = domain.alloc(0)?;
+        let _addr0 = domain.alloc(0)?;
         assert_eq!(domain.len(), 0, "Zero allocation should not change length");
 
         // Test normal allocation
@@ -278,6 +278,45 @@ mod tests {
         let block_content = block_addr.get_all(&memory)?;
         assert_eq!(block_content.len(), 0);
 
+        Ok(())
+    }
+    
+    #[test]
+    fn test_block_peek() -> Result<(), MemoryError> {
+        let mut memory = Memory::new(1024);
+        memory.init()?;
+
+        let block_addr = memory.alloc_empty_block(5)?;
+        
+        // Test peek on empty block
+        let result = block_addr.peek(&memory)?;
+        assert_eq!(result, None, "Peek on empty block should return None");
+        
+        // Add items and test peek
+        block_addr.push(VmValue::Int(42), &mut memory)?;
+        let result = block_addr.peek(&memory)?;
+        assert_eq!(result, Some(VmValue::Int(42)), "Peek should return the top item");
+        
+        // Add another item and test peek again
+        block_addr.push(VmValue::Int(24), &mut memory)?;
+        let result = block_addr.peek(&memory)?;
+        assert_eq!(result, Some(VmValue::Int(24)), "Peek should return the new top item");
+        
+        // Ensure peek doesn't modify the block
+        let block_content = block_addr.get_all(&memory)?;
+        assert_eq!(block_content.len(), 2, "Peek should not modify block length");
+        assert_eq!(block_content, &[VmValue::Int(42), VmValue::Int(24)], "Block content should be unchanged");
+        
+        // Pop and verify peek updates
+        let _ = block_addr.pop(&mut memory)?;
+        let result = block_addr.peek(&memory)?;
+        assert_eq!(result, Some(VmValue::Int(42)), "Peek should return the new top after pop");
+        
+        // Pop again and verify peek returns None
+        let _ = block_addr.pop(&mut memory)?;
+        let result = block_addr.peek(&memory)?;
+        assert_eq!(result, None, "Peek should return None after popping all items");
+        
         Ok(())
     }
 
