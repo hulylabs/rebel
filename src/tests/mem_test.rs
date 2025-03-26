@@ -282,6 +282,57 @@ mod tests {
     }
     
     #[test]
+    fn test_block_drop() -> Result<(), MemoryError> {
+        let mut memory = Memory::new(1024);
+        memory.init()?;
+
+        let block_addr = memory.alloc_empty_block(5)?;
+        
+        // Test drop on empty block (should return StackUnderflow)
+        let result = block_addr.drop(&mut memory);
+        assert!(matches!(result.unwrap_err(), MemoryError::StackUnderflow), "Drop on empty block should return StackUnderflow");
+        
+        // Push items
+        block_addr.push(VmValue::Int(42), &mut memory)?;
+        block_addr.push(VmValue::Int(24), &mut memory)?;
+        block_addr.push(VmValue::Int(13), &mut memory)?;
+        
+        // Verify initial content
+        let block_content = block_addr.get_all(&memory)?;
+        assert_eq!(block_content.len(), 3, "Block should have 3 items");
+        assert_eq!(block_content, &[VmValue::Int(42), VmValue::Int(24), VmValue::Int(13)]);
+        
+        // Drop one item
+        block_addr.drop(&mut memory)?;
+        
+        // Verify content after drop
+        let block_content = block_addr.get_all(&memory)?;
+        assert_eq!(block_content.len(), 2, "Block should have 2 items after drop");
+        assert_eq!(block_content, &[VmValue::Int(42), VmValue::Int(24)], "Last item should be dropped");
+        
+        // Drop another item
+        block_addr.drop(&mut memory)?;
+        
+        // Verify content after second drop
+        let block_content = block_addr.get_all(&memory)?;
+        assert_eq!(block_content.len(), 1, "Block should have 1 item after second drop");
+        assert_eq!(block_content, &[VmValue::Int(42)], "Second-to-last item should be dropped");
+        
+        // Drop final item
+        block_addr.drop(&mut memory)?;
+        
+        // Verify block is empty
+        let block_content = block_addr.get_all(&memory)?;
+        assert_eq!(block_content.len(), 0, "Block should be empty after all drops");
+        
+        // Try to drop from empty block (should return StackUnderflow)
+        let result = block_addr.drop(&mut memory);
+        assert!(matches!(result.unwrap_err(), MemoryError::StackUnderflow), "Drop on empty block should return StackUnderflow");
+        
+        Ok(())
+    }
+    
+    #[test]
     fn test_block_peek() -> Result<(), MemoryError> {
         let mut memory = Memory::new(1024);
         memory.init()?;

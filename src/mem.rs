@@ -20,7 +20,7 @@ pub enum MemoryError {
 pub type Word = u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Addr<T>(Word, PhantomData<T>);
+pub struct Addr<T>(pub Word, PhantomData<T>); // pub temporary
 
 impl<T> Addr<T>
 where
@@ -77,6 +77,15 @@ impl<'a, T> Addr<Block<T>>
 where
     T: Default + Copy,
 {
+    pub fn len<D>(&self, memory: &D) -> Result<Word, MemoryError>
+    where
+        D: BlockStorage<'a, T>,
+    {
+        memory
+            .access_block(Addr::new(self.0))
+            .map(|(block, _)| block.len())
+    }
+
     pub fn push<D>(&self, item: T, memory: &mut D) -> Result<(), MemoryError>
     where
         D: BlockStorage<'a, T>,
@@ -103,6 +112,15 @@ where
             .access_block_mut(Addr::new(self.0))
             .and_then(|(block, domain)| block.pop(domain))
     }
+    
+    pub fn drop<D>(&self, memory: &mut D) -> Result<(), MemoryError>
+    where
+        D: BlockStorage<'a, T>,
+    {
+        memory
+            .access_block_mut(Addr::new(self.0))
+            .and_then(|(block, _domain)| block.drop())
+    }
 
     pub fn get_all<'d, D>(&self, memory: &'d D) -> Result<&'d [T], MemoryError>
     where
@@ -112,7 +130,7 @@ where
             .access_block(Addr::new(self.0))
             .and_then(|(block, domain)| block.get_all(domain))
     }
-    
+
     pub fn peek<'d, D>(&self, memory: &'d D) -> Result<Option<T>, MemoryError>
     where
         D: BlockStorage<'a, T>,
@@ -167,8 +185,9 @@ impl Default for VmValue {
 
 //
 
+// TODO: should be private
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct AnyBlock {
+pub struct AnyBlock {
     cap: Word,
     len: Word,
     data: Word,
@@ -250,6 +269,14 @@ where
         domain.get_item(self.data().next(self.0.len)?).copied()
     }
     
+    pub fn drop(&mut self) -> Result<(), MemoryError> {
+        self.0.len = self
+            .len()
+            .checked_sub(1)
+            .ok_or(MemoryError::StackUnderflow)?;
+        Ok(())
+    }
+
     pub fn peek(&self, domain: &Domain<T>) -> Result<Option<T>, MemoryError> {
         if self.is_empty() {
             Ok(None)
@@ -457,7 +484,7 @@ pub trait BlockStorage<'a, T> {
 //
 
 pub struct Memory {
-    blocks: Domain<AnyBlock>,
+    pub blocks: Domain<AnyBlock>, // temporarily `pub`
     values: Domain<VmValue>,
     pairs: Domain<KeyValue>,
     bytes: Domain<u8>,
@@ -555,6 +582,16 @@ impl Memory {
     pub fn parse_block(&mut self, input: &str) -> Result<(), ParserError<MemoryError>> {
         Parser::parse_block(input, self)
     }
+
+    fn get_block<T>(&self, addr: Addr<Block<T>>) -> Result<&Block<T>, MemoryError>
+    where
+        T: Default + Copy,
+    {
+        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
+        let ptr = typeless as *const AnyBlock;
+        let block = unsafe { &*ptr.cast::<Block<T>>() };
+        Ok(block)
+    }
 }
 
 // P A R S E  C O L L E C T O R
@@ -607,10 +644,7 @@ impl<'a> BlockStorage<'a, VmValue> for Memory {
         &self,
         addr: Addr<Block<VmValue>>,
     ) -> Result<(&Block<VmValue>, &Domain<VmValue>), MemoryError> {
-        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
-        let ptr = typeless as *const AnyBlock;
-        let block = unsafe { &*ptr.cast::<Block<VmValue>>() };
-        Ok((block, &self.values))
+        Ok((self.get_block(addr)?, &self.values))
     }
 
     fn access_block_mut(
@@ -629,10 +663,7 @@ impl<'a> BlockStorage<'a, Word> for Memory {
         &self,
         addr: Addr<Block<Word>>,
     ) -> Result<(&Block<Word>, &Domain<Word>), MemoryError> {
-        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
-        let ptr = typeless as *const AnyBlock;
-        let block = unsafe { &*ptr.cast::<Block<Word>>() };
-        Ok((block, &self.words))
+        Ok((self.get_block(addr)?, &self.words))
     }
 
     fn access_block_mut(
@@ -651,10 +682,7 @@ impl<'a> BlockStorage<'a, u8> for Memory {
         &self,
         addr: Addr<Block<u8>>,
     ) -> Result<(&Block<u8>, &Domain<u8>), MemoryError> {
-        let typeless = self.blocks.get_item(Addr::new(addr.0))?;
-        let ptr = typeless as *const AnyBlock;
-        let block = unsafe { &*ptr.cast::<Block<u8>>() };
-        Ok((block, &self.bytes))
+        Ok((self.get_block(addr)?, &self.bytes))
     }
 
     fn access_block_mut(
