@@ -1,71 +1,68 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use crate::mem::{Block, CapAddress, LenAddress, MemValue, Memory, Offset, Stack, Word};
+use crate::mem::{Addr, Block, Domain, Memory, MemoryError, VmValue, Word};
 
-pub struct Vm<'a> {
-    memory: &'a mut Memory<'a>,
+#[derive(Debug, Clone, Copy)]
+enum OpKind {
+    None,
+    SetWord,
 }
 
-impl<'a> Vm<'a> {
-    pub fn new(memory: &'a mut Memory<'a>) -> Vm<'a> {
-        Vm { memory }
+#[derive(Debug, Clone, Copy)]
+struct Op {
+    kind: OpKind,
+    bp: Word,
+    arity: Word,
+}
+
+impl Default for Op {
+    fn default() -> Self {
+        Self {
+            kind: OpKind::None,
+            bp: 0,
+            arity: 0,
+        }
     }
 }
-// pub struct Process<'a> {
-//     vm: &'a mut Vm<'a>,
-//     block: Block<VmValue>,
-//     ip: Word,
-// }
 
-pub struct Process(Block<Word>); // struct
+pub struct Process {
+    block: Addr<Block<VmValue>>,
+    ip: Word,
+
+    op_domain: Domain<Op>,
+
+    stack: Block<VmValue>,
+    op_stack: Block<Op>,
+}
 
 impl Process {
-    const BLOCK: Offset = 0;
-    const IP: Offset = 1;
-    const STACK: Offset = 2;
-    const OP_STACK: Offset = 3;
+    pub fn new(memory: &mut Memory, stack_size: Word) -> Result<Self, MemoryError> {
+        let values = memory.alloc_values(stack_size)?;
+        let stack = Block::new(stack_size, stack_size, values);
 
-    pub fn alloc(memory: &mut Memory) -> Option<Process> {
-        let stack = memory.get_heap()?.alloc_stack::<MemValue>(memory, 256)?;
-        let op_stack = memory.get_heap()?.alloc_stack::<Word>(memory, 256)?;
-        Some(Process(memory.get_heap()?.alloc_block(
-            &[0, 0, stack.address(), op_stack.address()],
-            memory,
-        )?))
+        let mut op_domain = Domain::<Op>::new(256);
+        let ops = op_domain.alloc(256)?;
+        let op_stack = Block::new(256, 256, ops);
+
+        Ok(Self {
+            block: Addr::new(0),
+            ip: 0,
+            op_domain,
+            stack,
+            op_stack,
+        })
     }
 
-    pub fn get_current_block(&self, memory: &Memory) -> Option<Block<MemValue>> {
-        self.0
-            .get(Self::BLOCK, memory)
-            .map(LenAddress)
-            .map(Block::new)
+    fn next_op(&self) -> Result<(), MemoryError> {
+        loop {
+            // Check pending operations
+            if let Some(op) = self.op_stack.peek() {
+                let sp = self.stack.len();
+                if sp == bp + arity {
+                    let [op, word, _, _] = self.op_stack.pop()?;
+                    return Ok((op, word));
+                }
+            }
+        }
     }
-
-    pub fn set_current_block(&mut self, block: Block<Word>, memory: &mut Memory) {
-        self.0.set(Self::BLOCK, block.address(), memory);
-    }
-
-    pub fn get_ip(&self, memory: &Memory) -> Option<Word> {
-        self.0.get(Self::IP, memory)
-    }
-
-    pub fn set_ip(&mut self, ip: Word, memory: &mut Memory) {
-        self.0.set(Self::IP, ip, memory);
-    }
-
-    pub fn get_stack(&self, memory: &Memory) -> Option<Stack<MemValue>> {
-        self.0
-            .get(Self::STACK, memory)
-            .map(CapAddress)
-            .map(Stack::new)
-    }
-
-    pub fn get_op_stack(&self, memory: &Memory) -> Option<Stack<Word>> {
-        self.0
-            .get(Self::OP_STACK, memory)
-            .map(CapAddress)
-            .map(Stack::new)
-    }
-
-    //
 }

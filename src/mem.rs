@@ -134,16 +134,19 @@ where
 
 //
 
+pub type VmString = Block<u8>;
+pub type Symbol = Addr<VmString>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VmValue {
     None,
     Int(i32),
     Block(Addr<Block<VmValue>>),
     Context(Addr<Block<KeyValue>>),
-    String(Addr<Block<u8>>),
-    Word(Addr<Block<u8>>),
-    SetWord(Addr<Block<u8>>),
-    GetWord(Addr<Block<u8>>),
+    String(Addr<VmString>),
+    Word(Symbol),
+    SetWord(Symbol),
+    GetWord(Symbol),
     Path(Addr<Block<VmValue>>),
 }
 
@@ -232,8 +235,7 @@ where
 
     fn pop(&mut self, domain: &mut Domain<T>) -> Result<T, MemoryError> {
         self.0.len = self
-            .0
-            .len
+            .len()
             .checked_sub(1)
             .ok_or(MemoryError::StackUnderflow)?;
         domain.get_item(self.data().next(self.0.len)?).copied()
@@ -497,24 +499,8 @@ impl Memory {
         self.alloc_block_header(len, len, data.0)
     }
 
-    pub fn get_bytes(&self, addr: Addr<u8>, len: Word) -> Result<&[u8], MemoryError> {
-        self.bytes.get(addr, len)
-    }
-
-    pub fn get_bytes_mut(&mut self, addr: Addr<u8>, len: Word) -> Result<&mut [u8], MemoryError> {
-        self.bytes.get_mut(addr, len)
-    }
-
-    pub fn get_pairs(&self, addr: Addr<KeyValue>, len: Word) -> Result<&[KeyValue], MemoryError> {
-        self.pairs.get(addr, len)
-    }
-
-    pub fn get_pairs_mut(
-        &mut self,
-        addr: Addr<KeyValue>,
-        len: Word,
-    ) -> Result<&mut [KeyValue], MemoryError> {
-        self.pairs.get_mut(addr, len)
+    pub fn alloc_values(&mut self, items: Word) -> Result<Addr<VmValue>, MemoryError> {
+        self.values.alloc(items)
     }
 
     pub fn get_symbol(&mut self, string: &str) -> Result<Addr<Block<u8>>, MemoryError> {
