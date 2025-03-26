@@ -346,12 +346,12 @@ mod tests {
         // Add items and test peek
         block_addr.push(VmValue::Int(42), &mut memory)?;
         let result = block_addr.peek(&memory)?;
-        assert_eq!(result, Some(VmValue::Int(42)), "Peek should return the top item");
+        assert_eq!(result.map(|&r| r), Some(VmValue::Int(42)), "Peek should return the top item");
         
         // Add another item and test peek again
         block_addr.push(VmValue::Int(24), &mut memory)?;
         let result = block_addr.peek(&memory)?;
-        assert_eq!(result, Some(VmValue::Int(24)), "Peek should return the new top item");
+        assert_eq!(result.map(|&r| r), Some(VmValue::Int(24)), "Peek should return the new top item");
         
         // Ensure peek doesn't modify the block
         let block_content = block_addr.get_all(&memory)?;
@@ -361,7 +361,7 @@ mod tests {
         // Pop and verify peek updates
         let _ = block_addr.pop(&mut memory)?;
         let result = block_addr.peek(&memory)?;
-        assert_eq!(result, Some(VmValue::Int(42)), "Peek should return the new top after pop");
+        assert_eq!(result.map(|&r| r), Some(VmValue::Int(42)), "Peek should return the new top after pop");
         
         // Pop again and verify peek returns None
         let _ = block_addr.pop(&mut memory)?;

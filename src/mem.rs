@@ -131,7 +131,7 @@ where
             .and_then(|(block, domain)| block.get_all(domain))
     }
 
-    pub fn peek<'d, D>(&self, memory: &'d D) -> Result<Option<T>, MemoryError>
+    pub fn peek<'d, D>(&self, memory: &'d D) -> Result<Option<&'d T>, MemoryError>
     where
         D: BlockStorage<'a, T>,
     {
@@ -277,13 +277,13 @@ where
         Ok(())
     }
 
-    pub fn peek(&self, domain: &Domain<T>) -> Result<Option<T>, MemoryError> {
+    pub fn peek<'a>(&self, domain: &'a Domain<T>) -> Result<Option<&'a T>, MemoryError> {
         if self.is_empty() {
             Ok(None)
         } else {
             domain
                 .get_item(self.data().next(self.0.len - 1)?)
-                .map(|item| Some(*item))
+                .map(Some)
         }
     }
 
