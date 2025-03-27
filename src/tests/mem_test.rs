@@ -370,6 +370,63 @@ mod tests {
         
         Ok(())
     }
+    
+    #[test]
+    fn test_block_peek_at() -> Result<(), MemoryError> {
+        let mut memory = Memory::new(1024);
+        memory.init()?;
+
+        let block_addr = memory.alloc_empty_block(5)?;
+        
+        // Test peek_at on empty block
+        let result = block_addr.peek_at(0, &memory)?;
+        assert_eq!(result, None, "peek_at on empty block should return None");
+        
+        // Add multiple items
+        block_addr.push(VmValue::Int(10), &mut memory)?;
+        block_addr.push(VmValue::Int(20), &mut memory)?;
+        block_addr.push(VmValue::Int(30), &mut memory)?;
+        
+        // Test peek_at for each position
+        let result = block_addr.peek_at(0, &memory)?;
+        assert_eq!(result.map(|&r| r), Some(VmValue::Int(10)), "peek_at(0) should return first item");
+        
+        let result = block_addr.peek_at(1, &memory)?;
+        assert_eq!(result.map(|&r| r), Some(VmValue::Int(20)), "peek_at(1) should return second item");
+        
+        let result = block_addr.peek_at(2, &memory)?;
+        assert_eq!(result.map(|&r| r), Some(VmValue::Int(30)), "peek_at(2) should return third item");
+        
+        // Test out of bounds index (should return None)
+        let result = block_addr.peek_at(3, &memory)?;
+        assert_eq!(result, None, "peek_at with index == length should return None");
+        
+        let result = block_addr.peek_at(999, &memory)?;
+        assert_eq!(result, None, "peek_at with large out of bounds index should return None");
+        
+        // Ensure peek_at doesn't modify the block
+        let block_content = block_addr.get_all(&memory)?;
+        assert_eq!(block_content.len(), 3, "peek_at should not modify block length");
+        assert_eq!(
+            block_content, 
+            &[VmValue::Int(10), VmValue::Int(20), VmValue::Int(30)], 
+            "Block content should be unchanged after peek_at calls"
+        );
+        
+        // Pop an item and verify peek_at still works correctly
+        let _ = block_addr.pop(&mut memory)?;
+        
+        let result = block_addr.peek_at(0, &memory)?;
+        assert_eq!(result.map(|&r| r), Some(VmValue::Int(10)), "peek_at(0) should still return first item after pop");
+        
+        let result = block_addr.peek_at(1, &memory)?;
+        assert_eq!(result.map(|&r| r), Some(VmValue::Int(20)), "peek_at(1) should still return second item after pop");
+        
+        let result = block_addr.peek_at(2, &memory)?;
+        assert_eq!(result, None, "peek_at for popped index should return None");
+        
+        Ok(())
+    }
 
     #[test]
     fn test_memory_parser_support() -> Result<(), MemoryError> {

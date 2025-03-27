@@ -139,6 +139,15 @@ where
             .access_block(Addr::new(self.0))
             .and_then(|(block, domain)| block.peek(domain))
     }
+    
+    pub fn peek_at<'d, D>(&self, index: Word, memory: &'d D) -> Result<Option<&'d T>, MemoryError>
+    where
+        D: BlockStorage<'a, T>,
+    {
+        memory
+            .access_block(Addr::new(self.0))
+            .and_then(|(block, domain)| block.peek_at(index, domain))
+    }
 
     pub fn get<'d, D>(&self, index: Word, memory: &'d D) -> Result<T, MemoryError>
     where
@@ -283,6 +292,17 @@ where
         } else {
             domain
                 .get_item(self.data().next(self.0.len - 1)?)
+                .map(Some)
+        }
+    }
+    
+    /// Returns a reference to the element at the specified index, or None if the index is out of bounds
+    pub fn peek_at<'a>(&self, index: Word, domain: &'a Domain<T>) -> Result<Option<&'a T>, MemoryError> {
+        if index >= self.len() {
+            Ok(None)
+        } else {
+            domain
+                .get_item(self.data().next(index)?)
                 .map(Some)
         }
     }
