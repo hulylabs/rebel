@@ -1,11 +1,13 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use crate::mem::{Addr, AnyBlock, Block, BlockStorage, Domain, Memory, MemoryError, VmValue, Word};
+use crate::mem::{
+    Addr, AnyBlock, Block, BlockStorage, Domain, Memory, MemoryError, Symbol, VmValue, Word,
+};
 
 #[derive(Debug, Clone, Copy)]
 enum OpKind {
     Halt,
-    SetWord,
+    SetWord(Symbol),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -13,6 +15,12 @@ struct Op {
     kind: OpKind,
     bp: Word,
     arity: Word,
+}
+
+impl Op {
+    fn new(kind: OpKind, bp: Word, arity: Word) -> Self {
+        Self { kind, bp, arity }
+    }
 }
 
 impl Default for Op {
@@ -35,13 +43,54 @@ pub struct Process {
 
 // You can add process-specific methods if needed
 impl Process {
-    // Any process-specific functionality that doesn't need VM access
-    pub fn get_ip(&self) -> Word {
-        self.ip
+    fn resolve(&mut self, value: &VmValue, vm: &Vm) -> Result<VmValue, MemoryError> {
+        match value {
+            VmValue::Word(symbol) => vm.memory.get_value(*symbol),
+            _ => Ok(*value),
+        }
     }
 
-    pub fn set_ip(&mut self, new_ip: Word) {
-        self.ip = new_ip;
+    fn do_op(&mut self, op: Op, vm: &mut Vm) -> Result<(), MemoryError> {
+        match op.kind {
+            OpKind::Halt => {
+                // Halt the process
+                self.block = Addr::new(0);
+                self.ip = 0;
+                self.stack = Addr::new(0);
+                self.op_stack = Addr::new(0);
+            }
+            OpKind::SetWord(symbol) => {
+                let value = self.stack.pop(&mut vm.memory)?;
+                vm.memory.set_value(symbol, value)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn next_op(&mut self, vm: &mut Vm) -> Result<OpKind, MemoryError> {
+        loop {
+            // Check pending operations
+            if let Some(&op) = self.op_stack.peek(vm)? {
+                let sp = self.stack.len(&vm.memory)?;
+                if sp == op.bp + op.arity {
+                    self.op_stack.drop(vm)?;
+                    return Ok(op.kind);
+                }
+            }
+
+            // read next value
+            if let Some(val) = self.block.peek_at(self.ip, &vm.memory)? {
+                self.ip += 1;
+                let value = self.resolve(val, vm)?;
+                match value {
+                    VmValue::SetWord(symbol) => self.op_stack.push(
+                        Op::new(OpKind::SetWord(symbol), self.stack.len(&vm.memory)?, 1),
+                        vm,
+                    )?,
+                    _ => self.stack.push(value, &mut vm.memory)?,
+                }
+            }
+        }
     }
 }
 
@@ -105,19 +154,6 @@ impl Vm {
     //     }
     //     Ok(OpKind::None) // Process not found
     // }
-
-    // Static method to process the next operation
-    fn next_op(&mut self, process: &mut Process) -> Result<OpKind, MemoryError> {
-        // Check pending operations
-        if let Some(&op) = process.op_stack.peek(self)? {
-            let sp = process.stack.len(&self.memory)?;
-            if sp == op.bp + op.arity {
-                process.op_stack.drop(self)?;
-                return Ok(op.kind);
-            }
-        }
-        Ok(OpKind::Halt)
-    }
 }
 
 //

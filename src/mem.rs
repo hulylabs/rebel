@@ -15,11 +15,13 @@ pub enum MemoryError {
     StackUnderflow,
     #[error("stack overflow")]
     StackOverflow,
+    #[error("word not found")]
+    WordNotFound(Symbol),
 }
 
 pub type Word = u32;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Addr<T>(pub Word, PhantomData<T>); // pub temporary
 
 impl<T> Addr<T>
@@ -112,7 +114,7 @@ where
             .access_block_mut(Addr::new(self.0))
             .and_then(|(block, domain)| block.pop(domain))
     }
-    
+
     pub fn drop<D>(&self, memory: &mut D) -> Result<(), MemoryError>
     where
         D: BlockStorage<'a, T>,
@@ -139,7 +141,7 @@ where
             .access_block(Addr::new(self.0))
             .and_then(|(block, domain)| block.peek(domain))
     }
-    
+
     pub fn peek_at<'d, D>(&self, index: Word, memory: &'d D) -> Result<Option<&'d T>, MemoryError>
     where
         D: BlockStorage<'a, T>,
@@ -195,7 +197,7 @@ impl Default for VmValue {
 //
 
 // TODO: should be private
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AnyBlock {
     cap: Word,
     len: Word,
@@ -212,7 +214,7 @@ impl Default for AnyBlock {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Block<T>(AnyBlock, PhantomData<T>);
 
 impl<T> Block<T>
@@ -277,7 +279,7 @@ where
             .ok_or(MemoryError::StackUnderflow)?;
         domain.get_item(self.data().next(self.0.len)?).copied()
     }
-    
+
     pub fn drop(&mut self) -> Result<(), MemoryError> {
         self.0.len = self
             .len()
@@ -290,20 +292,20 @@ where
         if self.is_empty() {
             Ok(None)
         } else {
-            domain
-                .get_item(self.data().next(self.0.len - 1)?)
-                .map(Some)
+            domain.get_item(self.data().next(self.0.len - 1)?).map(Some)
         }
     }
-    
+
     /// Returns a reference to the element at the specified index, or None if the index is out of bounds
-    pub fn peek_at<'a>(&self, index: Word, domain: &'a Domain<T>) -> Result<Option<&'a T>, MemoryError> {
+    pub fn peek_at<'a>(
+        &self,
+        index: Word,
+        domain: &'a Domain<T>,
+    ) -> Result<Option<&'a T>, MemoryError> {
         if index >= self.len() {
             Ok(None)
         } else {
-            domain
-                .get_item(self.data().next(index)?)
-                .map(Some)
+            domain.get_item(self.data().next(index)?).map(Some)
         }
     }
 
@@ -510,7 +512,7 @@ pub struct Memory {
     bytes: Domain<u8>,
     words: Domain<Word>,
     symbols: HashMap<SmolStr, Addr<Block<u8>>>,
-    system: HashMap<Addr<Block<u8>>, VmValue>,
+    system: HashMap<Symbol, VmValue>,
     stack: Block<VmValue>,
     op_stack: Block<Word>,
 }
@@ -569,6 +571,8 @@ impl Memory {
         self.values.alloc(items)
     }
 
+    // S Y M B O L S  &  W O R D S
+
     pub fn get_symbol(&mut self, string: &str) -> Result<Addr<Block<u8>>, MemoryError> {
         let symbol = self.symbols.get(string).copied();
         if let Some(symbol) = symbol {
@@ -578,6 +582,13 @@ impl Memory {
             self.symbols.insert(string.into(), new_symbol);
             Ok(new_symbol)
         }
+    }
+
+    pub fn get_value(&self, symbol: Symbol) -> Result<VmValue, MemoryError> {
+        self.system
+            .get(&symbol)
+            .copied()
+            .ok_or(MemoryError::WordNotFound(symbol))
     }
 
     // P A R S E R  S U P P O R T
@@ -602,6 +613,8 @@ impl Memory {
     pub fn parse_block(&mut self, input: &str) -> Result<(), ParserError<MemoryError>> {
         Parser::parse_block(input, self)
     }
+
+    // D O M A I N  S U P P O R T
 
     fn get_block<T>(&self, addr: Addr<Block<T>>) -> Result<&Block<T>, MemoryError>
     where
