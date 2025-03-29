@@ -89,6 +89,15 @@ impl Process {
                     )?,
                     _ => self.stack.push(value, &mut vm.memory)?,
                 }
+            } else {
+                if let Some(&op) = self.op_stack.peek(vm)? {
+                    // TODO: we will do func return, etc later here
+                    self.op_stack.drop(vm)?;
+                    return Ok(op.kind);
+                } else {
+                    self.op_stack.drop(vm)?;
+                    return Ok(OpKind::Halt);
+                }
             }
         }
     }

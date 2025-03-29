@@ -591,6 +591,11 @@ impl Memory {
             .ok_or(MemoryError::WordNotFound(symbol))
     }
 
+    pub fn set_value(&mut self, symbol: Symbol, value: VmValue) -> Result<(), MemoryError> {
+        self.system.insert(symbol, value);
+        Ok(())
+    }
+
     // P A R S E R  S U P P O R T
 
     pub fn begin(&mut self) -> Result<(), MemoryError> {
