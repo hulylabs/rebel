@@ -1,12 +1,50 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use crate::mem::{Memory, MemoryError, Offset, Series, Value};
-use crate::parse::{Collector, WordKind};
+use crate::mem::{Memory, MemoryError, Offset, Series, Type, Value};
+use crate::parse::{Collector, Parser, WordKind};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum VmError {
+    #[error(transparent)]
+    ParserError(#[from] crate::parse::ParserError<MemoryError>),
+    #[error(transparent)]
+    MemoryError(#[from] MemoryError),
+}
 
 pub struct Process<'a> {
     memory: &'a mut Memory,
     stack: Series<Value>,
     pos_stack: Series<Offset>,
+}
+
+impl<'a> Process<'a> {
+    pub fn new(memory: &'a mut Memory) -> Result<Self, MemoryError> {
+        let stack = memory.alloc::<Value>(64)?;
+        let pos_stack = memory.alloc::<Offset>(64)?;
+        Ok(Self {
+            memory,
+            stack,
+            pos_stack,
+        })
+    }
+
+    pub fn parse_block(&mut self, input: &str) -> Result<Value, VmError> {
+        Parser::parse_block(input, self)?;
+        self.memory.pop(self.stack).map_err(Into::into)
+    }
+
+    fn begin(&mut self) -> Result<(), MemoryError> {
+        self.memory
+            .push(self.pos_stack, self.memory.len(self.stack)?)
+    }
+
+    fn end(&mut self, kind: Type) -> Result<(), MemoryError> {
+        let pos = self.memory.pop(self.pos_stack)?;
+        let block = self.memory.drain(self.stack, pos)?;
+        self.memory
+            .push(self.stack, Value::new(kind, block.address()))
+    }
 }
 
 impl<'a> Collector for Process<'a> {
@@ -31,26 +69,21 @@ impl<'a> Collector for Process<'a> {
 
     /// Called at the start of a block
     fn begin_block(&mut self) -> Result<(), Self::Error> {
-        self.memory
-            .push(self.pos_stack, self.memory.len(self.stack)?)
+        self.begin()
     }
 
     /// Called at the end of a block
     fn end_block(&mut self) -> Result<(), Self::Error> {
-        let block_series = self.drain()?;
-        let block = Value::block(block_series);
-        self.stack.push(block, &mut self.memory)
+        self.end(Value::BLOCK)
     }
 
     /// Called at the start of a path
     fn begin_path(&mut self) -> Result<(), Self::Error> {
-        let len = self.stack.len(self.memory)?;
-        self.pos_stack.push(len, &mut self.memory)
+        self.begin()
     }
 
     /// Called at the end of a path
     fn end_path(&mut self) -> Result<(), Self::Error> {
-        let block = self.drain().map(Value::path)?;
-        self.stack.push(block, &mut self.memory)
+        self.end(Value::PATH)
     }
 }

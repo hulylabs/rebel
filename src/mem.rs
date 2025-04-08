@@ -57,6 +57,10 @@ impl<T> Series<T> {
             _marker: std::marker::PhantomData,
         }
     }
+
+    pub fn address(&self) -> Address {
+        self.address
+    }
 }
 
 pub type String = Series<u8>;
@@ -215,7 +219,7 @@ impl Memory {
         memory
     }
 
-    fn alloc(&mut self, words: Offset) -> Result<Address, MemoryError> {
+    fn alloc_words(&mut self, words: Offset) -> Result<Address, MemoryError> {
         let len = self.memory.len() as Offset;
         let cap = Block::SIZE_IN_WORDS + words;
         let header = self.get_mut::<MemHeader>(0)?;
@@ -230,6 +234,12 @@ impl Memory {
             block.len = 0;
             Ok(heap_top)
         }
+    }
+
+    pub fn alloc<I>(&mut self, cap: Offset) -> Result<Series<I>, MemoryError> {
+        let size_in_words = (std::mem::size_of::<I>() / SIZE_OF_WORD) as Offset;
+        let address = self.alloc_words(cap * size_in_words)?;
+        Ok(Series::new(address))
     }
 
     fn get_words_slice(
@@ -286,7 +296,7 @@ impl Memory {
 
         let size_in_words = (size + SIZE_OF_WORD - 1) / SIZE_OF_WORD;
         let size_in_words = size_in_words as Offset;
-        let address = self.alloc(size_in_words)?;
+        let address = self.alloc_words(size_in_words)?;
         let block = self.get_mut::<Block>(address)?;
         block.len = size as Offset;
 
@@ -392,12 +402,11 @@ impl Memory {
             .copied()
     }
 
-    pub fn drain_to<I: AnyBitPattern + NoUninit>(
+    pub fn drain<I: AnyBitPattern + NoUninit>(
         &mut self,
         from: Series<I>,
         pos: Offset,
-        to: Series<I>,
-    ) -> Result<(), MemoryError> {
+    ) -> Result<Series<I>, MemoryError> {
         let item_size = std::mem::size_of::<I>() / SIZE_OF_WORD;
         let item_size = item_size as Offset;
 
@@ -406,34 +415,27 @@ impl Memory {
         let copy_len = from_len - pos;
         from_block.len = pos;
 
-        let to_block = self.get_mut::<Block>(to.address)?;
-        let to_cap = to_block.cap;
-        let to_len = to_block.len;
-
-        let new_to_len = to_len + copy_len;
-        let to_cap_items = (to_cap - Block::SIZE_IN_WORDS) / item_size;
-        if new_to_len > to_cap_items {
-            return Err(MemoryError::StackOverflow);
-        }
-        to_block.len = new_to_len;
+        let copy_words = copy_len * item_size;
+        let to_address = self.alloc_words(copy_words)?;
+        let to_block = self.get_mut::<Block>(to_address)?;
+        to_block.len = copy_len;
 
         let items_start = (from.address + Block::SIZE_IN_WORDS) as usize;
         let start = items_start + (pos * item_size) as usize;
-        let words_to_copy = (copy_len * item_size) as usize;
+        let copy_words = copy_words as usize;
 
-        let end = start + words_to_copy;
+        let end = start + copy_words;
         if end > self.memory.len() {
             return Err(MemoryError::OutOfBounds);
         }
 
-        let dst = items_start + (to_len * item_size) as usize;
-        if dst > self.memory.len() - words_to_copy {
+        let dst = (to_address + Block::SIZE_IN_WORDS) as usize;
+        if dst > self.memory.len() - copy_words {
             return Err(MemoryError::OutOfBounds);
         }
 
-        self.memory.copy_within(start..end, dst as usize);
-
-        Ok(())
+        self.memory.copy_within(start..end, dst);
+        Ok(Series::new(to_address))
     }
 }
 
@@ -457,11 +459,10 @@ pub fn pop(memory: &mut Memory, series: Series<Value>) -> Result<Value, MemoryEr
     memory.pop(series)
 }
 
-pub fn drain_to(
+pub fn drain(
     memory: &mut Memory,
     from: Series<Value>,
     pos: Offset,
-    to: Series<Value>,
-) -> Result<(), MemoryError> {
-    memory.drain_to(from, pos, to)
+) -> Result<Series<Value>, MemoryError> {
+    memory.drain(from, pos)
 }
