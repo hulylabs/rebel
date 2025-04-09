@@ -347,21 +347,21 @@ fn test_capacity_api() {
         .alloc::<Value>(requested_capacity)
         .expect("Failed to allocate Value series");
     let value_capacity =
-        rebel::mem::capacity(&memory, value_series).expect("Failed to get Value capacity");
+        rebel::mem::capacity_in_items(&memory, value_series).expect("Failed to get Value capacity");
 
     // u32 (each u32 is 4 bytes = 1 word)
     let u32_series = memory
         .alloc::<u32>(requested_capacity)
         .expect("Failed to allocate u32 series");
     let u32_capacity =
-        rebel::mem::capacity(&memory, u32_series).expect("Failed to get u32 capacity");
+        rebel::mem::capacity_in_items(&memory, u32_series).expect("Failed to get u32 capacity");
 
     // u8 (4 u8s fit in 1 word)
     let u8_series = memory
         .alloc::<u8>(requested_capacity * 4)
         .expect("Failed to allocate u8 series");
     let u8_capacity =
-        rebel::mem::capacity(&memory, u8_series).expect("Failed to get u8 capacity");
+        rebel::mem::capacity_in_items(&memory, u8_series).expect("Failed to get u8 capacity");
 
     println!("Value series capacity: {}", value_capacity);
     println!("u32 series capacity: {}", u32_capacity);

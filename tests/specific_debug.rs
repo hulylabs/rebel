@@ -57,7 +57,7 @@ fn debug_capacity() {
 
         // Get actual capacity
         let actual_capacity =
-            rebel::mem::capacity(&memory, series).expect("Failed to get capacity");
+            rebel::mem::capacity_in_items(&memory, series).expect("Failed to get capacity");
         let block = memory
             .get::<rebel::mem::Block>(series.address())
             .expect("Failed to get block");
@@ -66,8 +66,7 @@ fn debug_capacity() {
             "\nRequested capacity: {}, Actual capacity: {}",
             capacity, actual_capacity
         );
-        println!("Block.cap: {}, Block.len: {}", block.cap(), block.len());
-        println!("Block::SIZE_IN_WORDS: {}", rebel::mem::Block::SIZE_IN_WORDS);
+        println!("Block.len: {}", block.len());
 
         // Push values until it fails
         println!("Pushing values:");

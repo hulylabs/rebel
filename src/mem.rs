@@ -61,12 +61,7 @@ pub struct Block {
 }
 
 impl Block {
-    pub const SIZE_IN_WORDS: Offset = (std::mem::size_of::<Block>() / SIZE_OF_WORD) as Offset;
-
-    /// Returns the capacity of the block in words (including header)
-    pub fn cap(&self) -> Offset {
-        self.cap
-    }
+    const SIZE_IN_WORDS: Offset = (std::mem::size_of::<Block>() / SIZE_OF_WORD) as Offset;
 
     /// Returns the current number of items in the block
     pub fn len(&self) -> Offset {
@@ -548,12 +543,4 @@ pub fn capacity_in_items<I>(memory: &Memory, series: Series<I>) -> Result<Offset
 pub fn block_size_in_words<I>(memory: &Memory, series: Series<I>) -> Result<Offset, MemoryError> {
     let block = memory.get::<Block>(series.address)?;
     Ok(block.cap)
-}
-
-/// Backwards compatibility function for tests
-///
-/// Only for testing - not part of the stable API.
-#[doc(hidden)]
-pub fn capacity<I>(memory: &Memory, series: Series<I>) -> Result<Offset, MemoryError> {
-    capacity_in_items(memory, series)
 }
