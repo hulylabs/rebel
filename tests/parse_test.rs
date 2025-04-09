@@ -32,6 +32,12 @@ impl Collector for SimpleCollector {
         self.tokens.push(format!("Integer: {}", value));
         Ok(())
     }
+    
+    fn float(&mut self, value: f32) -> Result<(), Self::Error> {
+        // Format with enough precision to distinguish common values like PI
+        self.tokens.push(format!("Float: {:.6}", value));
+        Ok(())
+    }
 
     fn begin_block(&mut self) -> Result<(), Self::Error> {
         self.tokens.push("BeginBlock".to_string());
@@ -163,6 +169,23 @@ fn test_integers() {
 }
 
 #[test]
+fn test_floats() {
+    let input = "[3.14 -2.5 0.0 +10.75]";
+
+    let collector = parse(input).unwrap();
+    
+    // Now we can test exact string representation with fixed precision formatting
+    let tokens = &collector.tokens;
+    assert_eq!(tokens.len(), 6);
+    assert_eq!(tokens[0], "BeginBlock");
+    assert_eq!(tokens[1], "Float: 3.140000");
+    assert_eq!(tokens[2], "Float: -2.500000");
+    assert_eq!(tokens[3], "Float: 0.000000");
+    assert_eq!(tokens[4], "Float: 10.750000");
+    assert_eq!(tokens[5], "EndBlock");
+}
+
+#[test]
 fn test_words() {
     let input = "[word set-word: :get-word]";
 
@@ -236,27 +259,28 @@ fn test_mixed_tokens() {
             word2: -456 [nested]
             :get-word "multi
             line"
+            3.14159 -0.5
         ]"#;
 
     let collector = parse(input).unwrap();
 
-    assert_eq!(
-        collector.tokens,
-        vec![
-            "BeginBlock",
-            "Word: word1",
-            "Integer: 123",
-            "String: string",
-            "SetWord: word2",
-            "Integer: -456",
-            "BeginBlock",
-            "Word: nested",
-            "EndBlock",
-            "GetWord: get-word",
-            "String: multi\n            line",
-            "EndBlock"
-        ]
-    );
+    // Check the tokens one by one, avoiding exact float string representation checks
+    let tokens = &collector.tokens;
+    assert_eq!(tokens.len(), 14);
+    assert_eq!(tokens[0], "BeginBlock");
+    assert_eq!(tokens[1], "Word: word1");
+    assert_eq!(tokens[2], "Integer: 123");
+    assert_eq!(tokens[3], "String: string");
+    assert_eq!(tokens[4], "SetWord: word2");
+    assert_eq!(tokens[5], "Integer: -456");
+    assert_eq!(tokens[6], "BeginBlock");
+    assert_eq!(tokens[7], "Word: nested");
+    assert_eq!(tokens[8], "EndBlock");
+    assert_eq!(tokens[9], "GetWord: get-word");
+    assert_eq!(tokens[10], "String: multi\n            line");
+    assert_eq!(tokens[11], "Float: 3.141590");
+    assert_eq!(tokens[12], "Float: -0.500000");
+    assert_eq!(tokens[13], "EndBlock");
 }
 
 #[test]
@@ -287,6 +311,10 @@ fn test_error_conditions() {
     // Integer overflow (if we try to parse a number larger than i32::MAX)
     let result = parse("[99999999999]");
     assert!(matches!(result, Err(ParserError::IntegerOverflow)));
+    
+    // Invalid float format (multiple decimal points)
+    let result = parse("[3.14.159]");
+    assert!(matches!(result, Err(ParserError::UnexpectedChar('.'))));
 
     // Numbers must be followed by whitespace or closing bracket
     let result = parse("[12abc]");

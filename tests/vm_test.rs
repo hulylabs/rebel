@@ -86,6 +86,94 @@ fn test_parse_integer_block() -> Result<(), VmError> {
 }
 
 #[test]
+fn test_parse_float_block() -> Result<(), VmError> {
+    let mut memory = create_test_memory();
+    let mut process = Process::new(&mut memory)?;
+    
+    let result = process.parse_block("[3.14 -2.5 0.0]")?;
+    
+    // Verify the result is a block
+    assert_eq!(result.kind(), Value::BLOCK, "Result should be a BLOCK");
+    assert!(result.data() > 0, "Expected a valid block address");
+    
+    // Verify the outer block - should contain one inner block
+    let outer_block_addr = result.data();
+    let outer_block = memory.get::<rebel::mem::Block>(outer_block_addr)?;
+    assert_eq!(outer_block.len(), 1, "Outer block should have length 1");
+    
+    // Get the inner block and verify it contains floats
+    let inner_block_value = *memory.get::<Value>(outer_block_addr + 2)?;
+    assert_eq!(inner_block_value.kind(), Value::BLOCK, "Inner value should be a BLOCK");
+    
+    let inner_block_addr = inner_block_value.data();
+    let inner_block = memory.get::<rebel::mem::Block>(inner_block_addr)?;
+    assert_eq!(inner_block.len(), 3, "Inner block should contain 3 floats");
+    
+    // Verify the values: [3.14, -2.5, 0.0]
+    let value_1 = *memory.get::<Value>(inner_block_addr + 2)?; // First float
+    let value_2 = *memory.get::<Value>(inner_block_addr + 4)?; // Second float
+    let value_3 = *memory.get::<Value>(inner_block_addr + 6)?; // Third float
+    
+    assert_eq!(value_1.kind(), Value::FLOAT, "First value should be FLOAT");
+    assert!((value_1.as_float()? - 3.14).abs() < 0.0001, "First value should be 3.14");
+    
+    assert_eq!(value_2.kind(), Value::FLOAT, "Second value should be FLOAT");
+    assert!((value_2.as_float()? - (-2.5)).abs() < 0.0001, "Second value should be -2.5");
+    
+    assert_eq!(value_3.kind(), Value::FLOAT, "Third value should be FLOAT");
+    assert!((value_3.as_float()? - 0.0).abs() < 0.0001, "Third value should be 0.0");
+    
+    Ok(())
+}
+
+#[test]
+fn test_parse_mixed_numeric_block() -> Result<(), VmError> {
+    let mut memory = create_test_memory();
+    let mut process = Process::new(&mut memory)?;
+    
+    // Block with mixed integer and float values
+    let result = process.parse_block("[42 3.14159 -10 -0.5]")?;
+    
+    // Verify the result is a block
+    assert_eq!(result.kind(), Value::BLOCK, "Result should be a BLOCK");
+    assert!(result.data() > 0, "Expected a valid block address");
+    
+    // Verify the outer block - should contain one inner block
+    let outer_block_addr = result.data();
+    let outer_block = memory.get::<rebel::mem::Block>(outer_block_addr)?;
+    assert_eq!(outer_block.len(), 1, "Outer block should have length 1");
+    
+    // Get the inner block and verify it contains mixed values
+    let inner_block_value = *memory.get::<Value>(outer_block_addr + 2)?;
+    assert_eq!(inner_block_value.kind(), Value::BLOCK, "Inner value should be a BLOCK");
+    
+    let inner_block_addr = inner_block_value.data();
+    let inner_block = memory.get::<rebel::mem::Block>(inner_block_addr)?;
+    assert_eq!(inner_block.len(), 4, "Inner block should contain 4 values");
+    
+    // Check the values
+    let value_1 = *memory.get::<Value>(inner_block_addr + 2)?;
+    let value_2 = *memory.get::<Value>(inner_block_addr + 4)?;
+    let value_3 = *memory.get::<Value>(inner_block_addr + 6)?;
+    let value_4 = *memory.get::<Value>(inner_block_addr + 8)?;
+    
+    assert_eq!(value_1.kind(), Value::INT, "First value should be INT");
+    assert_eq!(value_1.data(), 42, "First value should be 42");
+    
+    assert_eq!(value_2.kind(), Value::FLOAT, "Second value should be FLOAT");
+    assert!((value_2.as_float()? - 3.14159).abs() < 0.0001, "Second value should be ~3.14159");
+    
+    assert_eq!(value_3.kind(), Value::INT, "Third value should be INT");
+    assert_eq!(value_3.data(), 0xFFFFFFF6, "Third value should be -10 (as two's complement)");
+    assert_eq!(value_3.as_int()?, -10, "Third value should be -10");
+    
+    assert_eq!(value_4.kind(), Value::FLOAT, "Fourth value should be FLOAT");
+    assert!((value_4.as_float()? - (-0.5)).abs() < 0.0001, "Fourth value should be -0.5");
+    
+    Ok(())
+}
+
+#[test]
 fn test_parse_string_block() -> Result<(), VmError> {
     let mut memory = create_test_memory();
     let mut process = Process::new(&mut memory)?;

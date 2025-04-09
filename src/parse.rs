@@ -16,6 +16,7 @@
 //!   - Set-words with trailing colon (e.g., `word:`)
 //!   - Get-words with leading colon (e.g., `:word`)
 //! - Integer literals (e.g., `123`, `-456`, `+789`)
+//! - Float literals (e.g., `3.14`, `-2.5`, `+10.0`)
 //! - Block structures with nested blocks (e.g., `[outer [inner]]`)
 //! - Path notation (e.g., `word/path/item`)
 //! - Comments using semicolons (e.g., `; comment`)
@@ -35,6 +36,9 @@ pub enum ParserError<C> {
     /// Integer value exceeds the range of i32
     #[error("integer overflow")]
     IntegerOverflow,
+    /// Float value exceeds the range of f32
+    #[error("float overflow")]
+    FloatOverflow,
     /// An unexpected error occurred
     #[error("unexpected error")]
     UnexpectedError,
@@ -73,6 +77,9 @@ pub trait Collector {
 
     /// Called when an integer is parsed
     fn integer(&mut self, value: i32) -> Result<(), Self::Error>;
+    
+    /// Called when a float is parsed
+    fn float(&mut self, value: f32) -> Result<(), Self::Error>;
 
     /// Called at the start of a block
     fn begin_block(&mut self) -> Result<(), Self::Error>;
@@ -139,6 +146,7 @@ where
     /// #     fn string(&mut self, _: &str) -> Result<(), ()> { Ok(()) }
     /// #     fn word(&mut self, _: WordKind, _: &str) -> Result<(), ()> { Ok(()) }
     /// #     fn integer(&mut self, _: i32) -> Result<(), ()> { Ok(()) }
+    /// #     fn float(&mut self, _: f32) -> Result<(), ()> { Ok(()) }
     /// #     fn begin_block(&mut self) -> Result<(), ()> { Ok(()) }
     /// #     fn end_block(&mut self) -> Result<(), ()> { Ok(()) }
     /// #     fn begin_path(&mut self) -> Result<(), ()> { Ok(()) }
@@ -182,6 +190,7 @@ where
     /// #     fn string(&mut self, _: &str) -> Result<(), ()> { Ok(()) }
     /// #     fn word(&mut self, _: WordKind, _: &str) -> Result<(), ()> { Ok(()) }
     /// #     fn integer(&mut self, _: i32) -> Result<(), ()> { Ok(()) }
+    /// #     fn float(&mut self, _: f32) -> Result<(), ()> { Ok(()) }
     /// #     fn begin_block(&mut self) -> Result<(), ()> { Ok(()) }
     /// #     fn end_block(&mut self) -> Result<(), ()> { Ok(()) }
     /// #     fn begin_path(&mut self) -> Result<(), ()> { Ok(()) }
@@ -304,9 +313,12 @@ where
     }
 
     fn parse_number(&mut self, char: char) -> Result<Option<char>, ParserError<C::Error>> {
-        let mut value: i32 = 0;
+        let mut int_value: i32 = 0;
+        let mut float_value: f32 = 0.0;
         let mut is_negative = false;
         let mut has_digits = false;
+        let mut is_float = false;
+        let mut decimal_position = 0.1;
         let mut consumed = None;
 
         match char {
@@ -315,7 +327,7 @@ where
                 is_negative = true;
             }
             c if c.is_ascii_digit() => {
-                value = c.to_digit(10).ok_or(ParserError::UnexpectedError)? as i32;
+                int_value = c.to_digit(10).ok_or(ParserError::UnexpectedError)? as i32;
                 has_digits = true;
             }
             _ => return Err(ParserError::UnexpectedChar(char)),
@@ -323,13 +335,25 @@ where
 
         for (_, char) in self.cursor.by_ref() {
             match char {
+                '.' if !is_float => {
+                    is_float = true;
+                    float_value = int_value as f32;
+                }
                 c if c.is_ascii_digit() => {
                     has_digits = true;
                     let digit = c.to_digit(10).ok_or(ParserError::UnexpectedError)? as i32;
-                    value = value
-                        .checked_mul(10)
-                        .and_then(|v| v.checked_add(digit))
-                        .ok_or(ParserError::IntegerOverflow)?;
+                    
+                    if is_float {
+                        let digit_float = digit as f32 * decimal_position;
+                        float_value += digit_float;
+                        decimal_position *= 0.1;
+                    } else {
+                        // Still parsing integer part
+                        int_value = int_value
+                            .checked_mul(10)
+                            .and_then(|v| v.checked_add(digit))
+                            .ok_or(ParserError::IntegerOverflow)?;
+                    }
                 }
                 ']' => {
                     consumed = Some(char);
@@ -343,16 +367,28 @@ where
                 }
             }
         }
+        
         if !has_digits {
             return Err(ParserError::EndOfInput);
         }
-        if is_negative {
-            value = value.checked_neg().ok_or(ParserError::IntegerOverflow)?;
+        
+        if is_float {
+            if is_negative {
+                float_value = -float_value;
+            }
+            self.collector
+                .float(float_value)
+                .map(|_| consumed)
+                .map_err(Into::into)
+        } else {
+            if is_negative {
+                int_value = int_value.checked_neg().ok_or(ParserError::IntegerOverflow)?;
+            }
+            self.collector
+                .integer(int_value)
+                .map(|_| consumed)
+                .map_err(Into::into)
         }
-        self.collector
-            .integer(value)
-            .map(|_| consumed)
-            .map_err(Into::into)
     }
 
     fn process_block_end(&mut self, consumed: Option<char>) -> Result<(), ParserError<C::Error>> {

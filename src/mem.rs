@@ -138,6 +138,7 @@ impl Value {
     pub const SET_WORD: Type = 6;
     pub const GET_WORD: Type = 7;
     pub const PATH: Type = 8;
+    pub const FLOAT: Type = 9;
 
     pub fn new(kind: Type, data: Word) -> Self {
         Self(kind, data)
@@ -157,6 +158,11 @@ impl Value {
 
     pub fn int(value: i32) -> Self {
         Value(Self::INT, value as Word)
+    }
+
+    pub fn float(value: f32) -> Self {
+        let bits = value.to_bits();
+        Value(Self::FLOAT, bits)
     }
 
     pub fn bool(value: bool) -> Self {
@@ -188,6 +194,11 @@ impl Value {
     /// Returns true if the value is an integer
     pub fn is_int(&self) -> bool {
         self.is_type(Self::INT)
+    }
+
+    /// Returns true if the value is a float
+    pub fn is_float(&self) -> bool {
+        self.is_type(Self::FLOAT)
     }
 
     /// Returns true if the value is a string
@@ -241,6 +252,14 @@ impl Value {
     pub fn as_int(&self) -> Result<i32, MemoryError> {
         if self.is_int() {
             Ok(self.1 as i32)
+        } else {
+            Err(MemoryError::TypeMismatch)
+        }
+    }
+    
+    pub fn as_float(&self) -> Result<f32, MemoryError> {
+        if self.is_float() {
+            Ok(f32::from_bits(self.1))
         } else {
             Err(MemoryError::TypeMismatch)
         }

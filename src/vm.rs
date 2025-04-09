@@ -66,6 +66,11 @@ impl Collector for Process<'_> {
     fn integer(&mut self, value: i32) -> Result<(), Self::Error> {
         self.memory.push(self.stack, Value::int(value))
     }
+    
+    /// Called when a float is parsed
+    fn float(&mut self, value: f32) -> Result<(), Self::Error> {
+        self.memory.push(self.stack, Value::float(value))
+    }
 
     /// Called at the start of a block
     fn begin_block(&mut self) -> Result<(), Self::Error> {
