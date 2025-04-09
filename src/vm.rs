@@ -47,7 +47,7 @@ impl<'a> Process<'a> {
     }
 }
 
-impl<'a> Collector for Process<'a> {
+impl Collector for Process<'_> {
     type Error = MemoryError;
 
     /// Called when a string is parsed

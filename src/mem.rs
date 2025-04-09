@@ -294,7 +294,7 @@ impl Memory {
         let bytes = string.as_bytes();
         let size = bytes.len();
 
-        let size_in_words = (size + SIZE_OF_WORD - 1) / SIZE_OF_WORD;
+        let size_in_words = size.div_ceil(SIZE_OF_WORD);
         let size_in_words = size_in_words as Offset;
         let address = self.alloc_words(size_in_words)?;
         let block = self.get_mut::<Block>(address)?;
