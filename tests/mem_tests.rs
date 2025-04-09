@@ -1,5 +1,5 @@
 // Tests for Rebel memory module
-use rebel::mem::{Memory, MemoryError, Value};
+use rebel::mem::{Memory, MemoryError, Value, Offset};
 
 // Test utility setup
 fn setup_memory() -> Memory {
@@ -91,18 +91,18 @@ fn test_stack_like_behavior() {
 
     // First pop (last pushed item)
     let popped = memory.pop(series).expect("Pop failed");
-    // First pop doesn't preserve kind, but does preserve data
-    assert_eq!(popped.data(), 0); // Based on debug test
+    assert_eq!(popped.kind(), Value::INT);
+    assert_eq!(popped.data(), 30);
 
     // Second pop (middle item)
     let popped = memory.pop(series).expect("Pop failed");
     assert_eq!(popped.kind(), Value::INT);
-    assert_eq!(popped.data(), 30); // Based on debug test
+    assert_eq!(popped.data(), 20);
 
     // Third pop (first item)
     let popped = memory.pop(series).expect("Pop failed");
     assert_eq!(popped.kind(), Value::INT);
-    assert_eq!(popped.data(), 20); // Based on debug test
+    assert_eq!(popped.data(), 10);
 
     // Length should now be 0
     assert_eq!(memory.len(series).unwrap(), 0);
@@ -124,19 +124,20 @@ fn test_push_all_function() {
     // Length should match the number of values pushed
     assert_eq!(memory.len(series).unwrap(), values.len() as u32);
 
-    // First pop (based on debug tests)
-    let popped = memory.pop(series).expect("Pop failed");
-    assert_eq!(popped.data(), 0); // From debugging
-
-    // Second pop
+    // First pop (last pushed item)
     let popped = memory.pop(series).expect("Pop failed");
     assert_eq!(popped.kind(), Value::INT);
     assert_eq!(popped.data(), 30);
 
-    // Third pop
+    // Second pop
     let popped = memory.pop(series).expect("Pop failed");
     assert_eq!(popped.kind(), Value::INT);
     assert_eq!(popped.data(), 20);
+
+    // Third pop
+    let popped = memory.pop(series).expect("Pop failed");
+    assert_eq!(popped.kind(), Value::INT);
+    assert_eq!(popped.data(), 10);
 
     // Length should now be 0
     assert_eq!(memory.len(series).unwrap(), 0);
@@ -160,27 +161,27 @@ fn test_drain_function() {
     assert_eq!(memory.len(series).unwrap(), drain_pos);
     assert_eq!(memory.len(drained).unwrap(), 2);
 
-    // Check values from original series (based on debug tests)
+    // Check values from original series
     // First pop (last value in original series)
     let popped = memory.pop(series).expect("Pop failed");
     assert_eq!(popped.kind(), Value::INT);
-    assert_eq!(popped.data(), 3); // From debug tests
+    assert_eq!(popped.data(), 2);
 
     // Second pop (first value in original series)
     let popped = memory.pop(series).expect("Pop failed");
     assert_eq!(popped.kind(), Value::INT);
-    assert_eq!(popped.data(), 2); // From debug tests
+    assert_eq!(popped.data(), 1);
 
-    // Check values from drained series (based on debug tests)
-    // First pop from drained series
-    let popped = memory.pop(drained).expect("Pop failed");
-    assert_eq!(popped.kind(), Value::NONE); // From debug tests
-    assert_eq!(popped.data(), 0); // From debug tests
-
-    // Second pop from drained series
+    // Check values from drained series
+    // First pop from drained series (last value)
     let popped = memory.pop(drained).expect("Pop failed");
     assert_eq!(popped.kind(), Value::INT);
-    assert_eq!(popped.data(), 4); // From debug tests
+    assert_eq!(popped.data(), 4);
+
+    // Second pop from drained series (first value)
+    let popped = memory.pop(drained).expect("Pop failed");
+    assert_eq!(popped.kind(), Value::INT);
+    assert_eq!(popped.data(), 3);
 }
 
 #[test]
@@ -313,6 +314,55 @@ fn test_block_operations() {
     assert_eq!(series_from_val.address(), block_series.address());
 }
 
+// Test specifically for pushing and popping block values
+#[test]
+fn test_push_pop_block_values() {
+    let mut memory = setup_memory();
+    
+    // Create a stack series
+    let stack = memory.alloc::<Value>(5).expect("Failed to allocate stack");
+    
+    // Create an empty block
+    let empty_block = memory.alloc::<Value>(0).expect("Failed to allocate empty block");
+    let block_val = Value::block(empty_block); // kind=4, data=address
+    
+    // Push the block value onto the stack
+    memory.push(stack, block_val).expect("Failed to push block value");
+    
+    // Check stack length
+    assert_eq!(memory.len(stack).unwrap(), 1);
+    
+    // Now pop the value and verify it maintains type information
+    let popped = memory.pop(stack).expect("Failed to pop block value");
+    
+    // IMPORTANT: Print the results for debugging
+    println!("Original block: kind={}, data={}", block_val.kind(), block_val.data());
+    println!("Popped  block: kind={}, data={}", popped.kind(), popped.data());
+    
+    // The popped value SHOULD preserve both kind and data
+    assert_eq!(popped.kind(), Value::BLOCK, "Kind was not preserved during pop");
+    assert_eq!(popped.data(), block_val.data(), "Data was not preserved during pop");
+}
+
+// Test specifically for empty block handling
+#[test]
+fn test_empty_block_handling() {
+    let mut memory = setup_memory();
+    
+    // Create an empty block
+    let empty_block = memory.alloc::<Value>(0).expect("Failed to allocate empty block");
+    let block_val = Value::block(empty_block);
+    
+    // Address should be valid
+    assert!(block_val.data() > 0, "Empty block address should be valid");
+    
+    // Check that it has BLOCK kind
+    assert_eq!(block_val.kind(), Value::BLOCK);
+    
+    // Check that the length is 0
+    assert_eq!(memory.len(empty_block).unwrap(), 0);
+}
+
 #[test]
 fn test_path_operations() {
     let mut memory = setup_memory();
@@ -333,6 +383,177 @@ fn test_path_operations() {
 fn test_memory_helpers() {
     // This test would use the helper module functionality if we were importing it.
     // For now, this test is a placeholder until we integrate with the helpers.
+}
+
+// Detailed test to investigate the pop and type preservation issue
+#[test]
+fn test_detailed_pop_behavior() {
+    let mut memory = setup_memory();
+    
+    // Create a stack series
+    let stack = memory.alloc::<Value>(5).expect("Failed to allocate stack");
+    
+    // Create an empty block first
+    let empty_block = memory.alloc::<Value>(0).expect("Failed to allocate empty block");
+    let block_val = Value::block(empty_block);
+    
+    println!("=== DETAILED POP TEST ===");
+    println!("Original block: kind={}, data={}", block_val.kind(), block_val.data());
+    
+    // Push the block value onto the stack
+    memory.push(stack, block_val).expect("Failed to push block value");
+    
+    // Verify the memory layout after pushing
+    println!("\nAfter pushing to stack:");
+    let stack_len = memory.len(stack).unwrap();
+    println!("Stack length: {}", stack_len);
+    
+    // Get direct pointer to the memory location where the block value was stored
+    // The item is stored at: stack.address + Block::SIZE_IN_WORDS + item_start
+    // For the only item pushed, item_start = 0
+    let item_location = stack.address() + 2; // Block::SIZE_IN_WORDS is 2
+    let stored_val = memory.get::<Value>(item_location).expect("Failed to read stored value");
+    println!("Value stored at memory: kind={}, data={}", stored_val.kind(), stored_val.data());
+    
+    // Now pop the value
+    let popped = memory.pop(stack).expect("Failed to pop block value");
+    println!("\nAfter popping from stack:");
+    println!("Popped value: kind={}, data={}", popped.kind(), popped.data());
+    
+    // The popped value SHOULD preserve both kind and data
+    // If this fails, then we have identified the issue
+    assert_eq!(
+        popped.kind(), 
+        Value::BLOCK, 
+        "Kind was not preserved during pop! Expected={}, Got={}", 
+        Value::BLOCK, 
+        popped.kind()
+    );
+    assert_eq!(
+        popped.data(), 
+        block_val.data(), 
+        "Data was not preserved during pop! Expected={}, Got={}", 
+        block_val.data(), 
+        popped.data()
+    );
+}
+
+// Additional test focusing on drain operation since that's used in Process::end
+#[test]
+fn test_detailed_drain_behavior() {
+    let mut memory = setup_memory();
+    
+    // Create a stack series
+    let stack = memory.alloc::<Value>(10).expect("Failed to allocate stack");
+    
+    // Push multiple values (similar to what the parser would do)
+    memory.push(stack, Value::int(10)).expect("Push failed");
+    memory.push(stack, Value::int(20)).expect("Push failed");
+    memory.push(stack, Value::int(30)).expect("Push failed");
+    
+    println!("=== DETAILED DRAIN TEST ===");
+    println!("Initial stack length: {}", memory.len(stack).unwrap());
+    
+    // Record the position where we'll drain from 
+    let pos = 1; // We'll drain from position 1 (keeping item at pos 0)
+    
+    // Perform the drain operation (similar to Process::end)
+    println!("\nPerforming drain from position {}", pos);
+    let drained_series = memory.drain(stack, pos).expect("Drain failed");
+    
+    // Now verify both the original stack and the drained series
+    println!("\nAfter drain:");
+    println!("Original stack length: {}", memory.len(stack).unwrap());
+    println!("Drained series length: {}", memory.len(drained_series).unwrap());
+    
+    // Now create a block value from the drained series (like Process::end does)
+    let block_value = Value::block(drained_series);
+    println!("Block value created from drained series: kind={}, data={}", 
+             block_value.kind(), block_value.data());
+    
+    // Push the block value back onto the stack (like Process::end does)
+    memory.push(stack, block_value).expect("Failed to push block value");
+    println!("\nAfter pushing block value back to stack:");
+    println!("Stack length: {}", memory.len(stack).unwrap());
+    
+    // Now pop the value (like Process::parse_block does at the end)
+    let popped = memory.pop(stack).expect("Failed to pop value");
+    println!("\nPopped value from stack: kind={}, data={}", popped.kind(), popped.data());
+    
+    // The popped value should be a block with the correct kind
+    assert_eq!(
+        popped.kind(), 
+        Value::BLOCK, 
+        "Kind was not preserved during drain/push/pop cycle! Expected={}, Got={}", 
+        Value::BLOCK, 
+        popped.kind()
+    );
+    assert_eq!(
+        popped.data(), 
+        block_value.data(), 
+        "Data was not preserved during drain/push/pop cycle! Expected={}, Got={}", 
+        block_value.data(), 
+        popped.data()
+    );
+    
+    // Also verify we can use the block as a series (conversion works)
+    assert!(popped.is_block(), "Popped value should be recognized as a block");
+    let _ = popped.as_block().expect("Should convert to block series without error");
+}
+
+// Test specifically simulating empty block parsing in Process::parse_block
+#[test]
+fn test_parse_block_simulation() {
+    let mut memory = setup_memory();
+    
+    println!("=== EMPTY BLOCK PARSING SIMULATION ===");
+    
+    // STEP 1: Setup the process stacks (similar to Process::new)
+    let stack = memory.alloc::<Value>(10).expect("Failed to allocate stack");
+    let pos_stack = memory.alloc::<Offset>(10).expect("Failed to allocate pos_stack");
+    
+    // STEP 2: Begin block (similar to Process::begin_block)
+    memory.push(pos_stack, memory.len(stack).unwrap()).expect("Failed to push position");
+    println!("After begin_block: Pushed position {} to pos_stack", memory.len(stack).unwrap());
+    
+    // STEP 3: For empty block "[]", no values are pushed to the stack
+    // Just simulating what happens in parse_block when input is "[]"
+    
+    // STEP 4: End block (similar to Process::end_block -> Process::end(Value::BLOCK))
+    // Pop the position
+    let pos = memory.pop(pos_stack).expect("Failed to pop position");
+    println!("Popped position: {}", pos);
+    
+    // Drain from the position (should be 0 for empty block)
+    let drained = memory.drain(stack, pos).expect("Failed to drain stack");
+    println!("Drained series length: {}", memory.len(drained).unwrap());
+    
+    // Create a block value and push it to the stack
+    let block_val = Value::block(drained);
+    println!("Created block value: kind={}, data={}", block_val.kind(), block_val.data());
+    memory.push(stack, block_val).expect("Failed to push block value");
+    
+    // STEP 5: Final pop (similar to Process::parse_block)
+    let result = memory.pop(stack).expect("Failed to pop final value");
+    println!("Final popped value: kind={}, data={}", result.kind(), result.data());
+    
+    // The result should be a block with the correct kind and data
+    assert_eq!(
+        result.kind(), 
+        Value::BLOCK, 
+        "Kind was not preserved! Expected={}, Got={}", 
+        Value::BLOCK, 
+        result.kind()
+    );
+    
+    // The block value's data should match the address of the drained series
+    assert_eq!(
+        result.data(), 
+        block_val.data(), 
+        "Data was not preserved! Expected={}, Got={}", 
+        block_val.data(), 
+        result.data()
+    );
 }
 
 #[test]

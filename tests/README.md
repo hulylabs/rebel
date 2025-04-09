@@ -6,6 +6,7 @@ This directory contains tests for the Rebel interpreter, a Rebol-inspired langua
 
 - `mem_tests.rs` - Tests for the memory management system
 - `parse_test.rs` - Tests for the parser implementation
+- `vm_test.rs` - Tests for the VM and Process implementation, including parser integration
 - `helpers.rs` - Helper functions for tests
 
 ## Memory System Behavior Notes
@@ -43,6 +44,26 @@ Through testing, we've documented some specific behaviors of the memory system:
    - The original series retains values [0..pos]
    - The new series contains values [pos..end]
    - When popping from both series, the value order and preservation behavior follows the regular pop pattern
+
+## Process & Parser Integration Notes
+
+Through VM testing, we've documented some specific behaviors when using the Process implementation to parse blocks:
+
+1. **Return Value Behavior:**
+   - The `Process::parse_block` method returns a Value
+   - For empty blocks, the return value might have kind=0 (NONE) and data=0
+   - For simple blocks with elements of the same type, the return value's kind might reflect the element type
+   - For blocks with nested blocks or paths, the return value usually has kind=Value::BLOCK (4)
+   - Always test for successful parsing by checking that a value is returned, rather than relying on specific kind/data values
+
+2. **Block Parsing:**
+   - The parser correctly processes various types: integers, strings, words, blocks, and paths
+   - Comments (using ; syntax) are properly ignored
+   - Error handling for issues like invalid escape sequences works as expected
+
+3. **Memory Management:**
+   - Multiple parsed blocks are stored in different memory locations
+   - The Process itself manages the memory allocation and reuse
 
 ## Running Tests
 

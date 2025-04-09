@@ -471,7 +471,8 @@ impl Memory {
 
         let len = block.len;
         let new_len = len.checked_sub(1).ok_or(MemoryError::StackUnderflow)?;
-        let item_start = len * item_size;
+        // To pop from the end of the stack, we need to use new_len (len-1)
+        let item_start = new_len * item_size;
 
         block.len = new_len;
         self.get::<I>(series.address + Block::SIZE_IN_WORDS + item_start)
