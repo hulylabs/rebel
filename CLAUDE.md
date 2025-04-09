@@ -25,7 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Memory System Guidelines
 - Use byte-based calculations for memory operations (allocation, capacity)
-- Always use the public API methods like `capacity()` instead of working with Block fields directly
+- Never access Block fields directly - always use the public Memory methods
 - Series operations follow LIFO (stack-like) behavior - push adds to end, pop removes from end
 - Be aware of memory error types: StackOverflow, StackUnderflow, OutOfMemory, etc.
 - See MEMORY.md for detailed memory system documentation

@@ -99,12 +99,6 @@ Always handle the various memory errors appropriately:
 ## Testing Notes
 
 When writing tests, be aware of some memory behavior quirks:
-
-1. First pop after pushes may have type issues:
-   - The kind field is often reset to 0
-   - The data field may still be preserved
-   - Subsequent pops preserve both fields correctly
-
-2. Capacity rounding:
+1. Capacity rounding:
    - The actual capacity may be slightly different than requested
-   - Use the `capacity()` function to get the true capacity
+   - Be aware of how item sizes affect actual capacity

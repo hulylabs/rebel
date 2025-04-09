@@ -17,15 +17,7 @@ Through testing, we've documented some specific behaviors of the memory system:
    - Series act like a stack with LIFO (Last In, First Out) behavior
    - Push operations add to the end of the series
    - Pop operations remove from the end of the series
-
-2. **Value preservation:**
-   - When popping multiple values, the *first* popped value often has type issues:
-     - The `kind` field is typically reset to `0` (NONE)
-     - The `data` field is sometimes preserved correctly, sometimes not
-   - Subsequent pops correctly preserve both the `kind` and `data` fields
-   - This is particularly important to remember when testing
-
-3. **Block structure and capacity:**
+2. **Block structure and capacity:**
    - A Block consists of a header (8 bytes = 2 words) containing:
      - `cap`: Total capacity of the block in Words (u32), including the header itself
      - `len`: Number of items currently in the block (type-dependent)
@@ -36,14 +28,13 @@ Through testing, we've documented some specific behaviors of the memory system:
    - Memory allocation computes the right size based on the item type:
      - For larger types (>= word size), it allocates enough words per item
      - For smaller types (< word size), it packs multiple items per word
-   - Always use the public API `capacity()` to get the accurate item capacity
+   - Use capacity_in_items() for testing to get the accurate item capacity
    - `StackOverflow` errors occur when trying to push beyond capacity
 
-4. **Drain operation:**
+3. **Drain operation:**
    - `drain` splits a series at a specified position
    - The original series retains values [0..pos]
    - The new series contains values [pos..end]
-   - When popping from both series, the value order and preservation behavior follows the regular pop pattern
 
 ## Process & Parser Integration Notes
 
