@@ -309,13 +309,14 @@ impl Memory {
 
         // Round up to whole words (4-byte units)
         let bytes_per_word = SIZE_OF_WORD;
-        let words_needed = (total_bytes_needed + bytes_per_word - 1) / bytes_per_word;
+        let words_needed = total_bytes_needed.div_ceil(bytes_per_word);
 
         // Allocate the block with header + data
         let address = self.alloc_words(words_needed as Offset)?;
         Ok(Series::new(address))
     }
 
+    #[allow(dead_code)]
     fn get_words_slice(
         &self,
         address: Address,
@@ -340,6 +341,7 @@ impl Memory {
             .ok_or(MemoryError::OutOfBounds)
     }
 
+    #[allow(dead_code)]
     fn get_items_slice<I: AnyBitPattern>(
         &self,
         address: Address,

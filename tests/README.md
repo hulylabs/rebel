@@ -5,8 +5,6 @@ This directory contains tests for the Rebel interpreter, a Rebol-inspired langua
 ## Test Structure
 
 - `mem_tests.rs` - Tests for the memory management system
-- `debug_mem.rs` - Debug utilities for memory operations
-- `specific_debug.rs` - More specific debug tests for edge cases
 - `helpers.rs` - Helper functions for tests
 
 ## Memory System Behavior Notes
@@ -60,12 +58,12 @@ cargo test -- --nocapture
 
 ## Debugging Memory Issues
 
-For debugging memory-related issues, use the debug utilities:
+For debugging memory-related issues, you can write custom tests that print values:
 
 ```rust
-// Example from specific_debug.rs
+// Example test for debugging
 #[test]
-fn debug_drain_popping() {
+fn debug_memory_operations() {
     let mut memory = Memory::new(4096);
     let series = memory.alloc::<Value>(5).expect("Failed to allocate series");
     
