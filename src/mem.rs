@@ -33,17 +33,64 @@ const SIZE_OF_WORD: usize = std::mem::size_of::<Word>();
 
 //
 
+/// Block is the header structure for all allocated Series in the Rebel memory system.
+/// 
+/// Every Series has a Block header at its start, containing:
+/// - `cap`: Total capacity of the block in Words (u32), including the header itself
+/// - `len`: Current length of the block in items (type-dependent)
+/// 
+/// Memory layout:
+/// ```text
+/// +------------------+
+/// | Block (8 bytes)  |
+/// | - cap: u32       | <- Series.address points here
+/// | - len: u32       |
+/// +------------------+
+/// | Data area...     | <- Items are stored here
+/// | (cap - 2) words  |
+/// +------------------+
+/// ```
+/// 
+/// The Series<T> type is just a reference to a Block, it holds an address
+/// to the start of the Block and a marker for the contained type.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
-struct Block {
-    cap: Offset,
-    len: Offset,
+pub struct Block {
+    pub cap: Offset,  // Total capacity in 32-bit words, including the header
+    pub len: Offset,  // Number of items currently in the block
 }
 
 impl Block {
-    const SIZE_IN_WORDS: Offset = (std::mem::size_of::<Block>() / SIZE_OF_WORD) as Offset;
+    pub const SIZE_IN_WORDS: Offset = (std::mem::size_of::<Block>() / SIZE_OF_WORD) as Offset;
 }
 
+/// Series represents a reference to a block of homogeneous items in memory.
+///
+/// Series is a low-level handle to a memory block containing items of a specific type.
+/// The Series itself doesn't own the memory, it's just a reference to a block
+/// allocated in the Memory system.
+///
+/// Series are the building blocks for strings, arrays, blocks, and other
+/// composite data structures in the Rebel system.
+///
+/// ## Memory Layout
+///
+/// A Series is just a reference (address) to a Block in memory.
+/// The Block contains a header with capacity and length information,
+/// followed by the actual data items.
+///
+/// ```text
+/// +------------------+
+/// | Block header     |
+/// +------------------+ <- Series.address points here
+/// | Item 0           |
+/// | Item 1           |
+/// | ...              |
+/// | Item N-1         |
+/// +------------------+
+/// ```
+///
+/// Use the Memory methods (push, pop, len, etc.) to interact with the Series data.
 #[derive(Debug, Clone, Copy)]
 pub struct Series<T> {
     address: Address,
@@ -236,9 +283,26 @@ impl Memory {
         }
     }
 
+    /// Allocates a new Series with capacity for at least `cap` items of type I.
+    ///
+    /// Notes about capacity:
+    /// - The capacity is in items, not bytes or words
+    /// - The actual storage will be rounded up to whole words
+    /// - The minimum allocation is Block::SIZE_IN_WORDS (header) + storage for items
+    /// 
+    /// For types smaller than a word (like u8), multiple items can be stored per word.
+    /// For types larger than a word (like Value), multiple words are needed per item.
     pub fn alloc<I>(&mut self, cap: Offset) -> Result<Series<I>, MemoryError> {
-        let size_in_words = (std::mem::size_of::<I>() / SIZE_OF_WORD) as Offset;
-        let address = self.alloc_words(cap * size_in_words)?;
+        // Calculate bytes needed for all items
+        let item_size_bytes = std::mem::size_of::<I>();
+        let total_bytes_needed = item_size_bytes * cap as usize;
+        
+        // Round up to whole words (4-byte units)
+        let bytes_per_word = SIZE_OF_WORD;
+        let words_needed = (total_bytes_needed + bytes_per_word - 1) / bytes_per_word;
+        
+        // Allocate the block with header + data
+        let address = self.alloc_words(words_needed as Offset)?;
         Ok(Series::new(address))
     }
 
@@ -439,9 +503,28 @@ impl Memory {
     }
 }
 
-pub fn get(memory: &Memory, offset: Address) -> Result<&Block, MemoryError> {
-    memory.get(offset)
+/// Returns the capacity of a block in items (not including header size)
+pub fn capacity<I>(memory: &Memory, series: Series<I>) -> Result<Offset, MemoryError> {
+    let block = memory.get::<Block>(series.address)?;
+    
+    // Calculate total available space in bytes (excluding header)
+    let data_words = block.cap - Block::SIZE_IN_WORDS;
+    let data_bytes = data_words as usize * SIZE_OF_WORD;
+    
+    // Calculate how many items of type I can fit in that many bytes
+    let item_size_bytes = std::mem::size_of::<I>();
+    let capacity_in_items = data_bytes / item_size_bytes;
+    
+    Ok(capacity_in_items as Offset)
 }
+
+/// Returns the total size of a block in words (including header)
+pub fn block_size_in_words<I>(memory: &Memory, series: Series<I>) -> Result<Offset, MemoryError> {
+    let block = memory.get::<Block>(series.address)?;
+    Ok(block.cap)
+}
+
+// This function is intentionally removed as it was not needed
 
 pub fn push(memory: &mut Memory, series: Series<Value>, value: Value) -> Result<(), MemoryError> {
     memory.push(series, value)
