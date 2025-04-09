@@ -5,6 +5,7 @@ This directory contains tests for the Rebel interpreter, a Rebol-inspired langua
 ## Test Structure
 
 - `mem_tests.rs` - Tests for the memory management system
+- `parse_test.rs` - Tests for the parser implementation
 - `helpers.rs` - Helper functions for tests
 
 ## Memory System Behavior Notes

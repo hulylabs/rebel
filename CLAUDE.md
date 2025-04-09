@@ -13,10 +13,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Format code: `cargo fmt`
 
 ## Project Structure
+- **src/lib.rs**: Main library entry point
 - **src/mem.rs**: Memory management system (Series, Block, allocation)
 - **src/parse.rs**: Parser for the REBOL-inspired language
 - **src/vm.rs**: Virtual machine implementation
 - **tests/**: Comprehensive test suite for all components
+  - **tests/mem_tests.rs**: Memory system tests
+  - **tests/parse_test.rs**: Parser tests
+  - **tests/helpers.rs**: Helper utilities for tests
 - **MEMORY.md**: Detailed explanation of the memory system
 
 ## Memory System Guidelines
@@ -41,5 +45,5 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Keep tests in the `tests/` directory
 - Follow existing test patterns for consistency
 - Test both success and error conditions
-- Use debugging tests for complex behavior investigation
+- For debugging complex behavior, write custom tests with println! statements
 - When testing memory operations, be aware of implementation details
