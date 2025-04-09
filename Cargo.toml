@@ -6,3 +6,18 @@ edition = "2024"
 [dependencies]
 bytemuck = { version = "1.22.0", features = ["derive", "extern_crate_alloc", "must_cast"] }
 thiserror = "2.0.12"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "memory_benchmarks"
+harness = false
+
+[[bench]]
+name = "parser_benchmarks"
+harness = false
+
+[[bench]]
+name = "vm_benchmarks"
+harness = false
