@@ -816,29 +816,29 @@ mod tests {
     #[test]
     fn test_compile_multiple_set_words() -> Result<(), VmError> {
         let mut memory = create_test_memory()?;
+        let mut process = Process::new(&mut memory)?;
 
-        // Parse and compile in separate scopes to avoid borrow issues
-        let block_value = {
-            let mut process = Process::new(&mut memory)?;
-            process.parse_block("[x: y: z: 42 y]")?
-        };
+        let block = process.parse_block("x: y: z: 42 y")?;
+        let code_block = process.compile(block.as_block()?)?;
+        let code = memory.peek_at(code_block, 0)?;
 
-        let block_address = block_value.as_block()?.address();
-        let inner_block_value = *memory.get::<Value>(block_address + 2)?;
-        let inner_block = inner_block_value.as_block()?;
-
-        let compiled = {
-            let mut process = Process::new(&mut memory)?;
-            process.compile(inner_block)?
-        };
-
-        // Verify that compilation works by checking block length
-        let compiled_addr = compiled.address();
-        let compiled_block = memory.get::<Block>(compiled_addr)?;
-
-        // After debugging, we found the correct number of instructions is 5
-        // (TYPE, CONST, SET_WORD z, SET_WORD y, SET_WORD x, WORD y)
-        assert_eq!(compiled_block.len(), 5, "Block length should be 5");
+        match code {
+            [
+                Code(Code::TYPE, Value::INT),
+                Code(Code::CONST, 42),
+                Code(Code::SET_WORD, x),
+                Code(Code::SET_WORD, y),
+                Code(Code::SET_WORD, z),
+                Code(Code::WORD, m),
+                Code(Code::LEAVE, 1),
+            ] => {
+                assert_eq!(m, y, "y should be same symbol");
+                assert_ne!(x, y, "x should be different from y");
+                assert_ne!(x, z, "x should be different from z");
+                assert_ne!(y, z, "y should be different from z");
+            }
+            _ => panic!("Unexpected code sequence: {:?}", code),
+        }
 
         Ok(())
     }
