@@ -129,6 +129,8 @@ pub type String = Series<u8>;
 pub struct Value(Type, Word);
 
 impl Value {
+    pub const SIZE_IN_WORDS: Offset = (std::mem::size_of::<Value>() / SIZE_OF_WORD) as Offset;
+
     pub const NONE: Type = 0;
     pub const INT: Type = 1;
     pub const BOOL: Type = 2;
@@ -256,7 +258,7 @@ impl Value {
             Err(MemoryError::TypeMismatch)
         }
     }
-    
+
     pub fn as_float(&self) -> Result<f32, MemoryError> {
         if self.is_float() {
             Ok(f32::from_bits(self.1))
@@ -496,6 +498,23 @@ impl Memory {
         block.len = new_len;
         self.get::<I>(series.address + Block::SIZE_IN_WORDS + item_start)
             .copied()
+    }
+
+    pub fn peek<I: AnyBitPattern>(&self, series: Series<I>) -> Result<Option<&I>, MemoryError> {
+        let item_size = std::mem::size_of::<I>() / SIZE_OF_WORD;
+        let item_size = item_size as Offset;
+        let block = self.get::<Block>(series.address)?;
+
+        let len = block.len;
+        if len == 0 {
+            Ok(None)
+        } else {
+            let item_offset = len - 1;
+            let item_start = item_offset * item_size;
+
+            self.get::<I>(series.address + Block::SIZE_IN_WORDS + item_start)
+                .map(Some)
+        }
     }
 
     pub fn drain<I: AnyBitPattern + NoUninit>(
