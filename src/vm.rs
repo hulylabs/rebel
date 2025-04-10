@@ -15,21 +15,21 @@ pub enum VmError {
 
 //
 
-pub type Op = Word;
-pub type CodeBlock = Series<Code>;
+type Op = Word;
+// pub type CodeBlock = Series<Code>;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable, PartialEq, Eq)]
-pub struct Code(pub Op, pub Word);
+pub struct Code(Op, Word);
 
 impl Code {
-    pub const HALT: Op = 0;
-    pub const CONST: Op = 1;
-    pub const TYPE: Op = 2;
-    pub const WORD: Op = 3;
-    pub const SET_WORD: Op = 4;
-    pub const CALL_NATIVE: Op = 5;
-    pub const LEAVE: Op = 6;
+    // const HALT: Op = 0;
+    const CONST: Op = 1;
+    const TYPE: Op = 2;
+    const WORD: Op = 3;
+    const SET_WORD: Op = 4;
+    // const CALL_NATIVE: Op = 5;
+    const LEAVE: Op = 6;
 
     pub fn new(op: Op, data: Word) -> Self {
         Code(op, data)
