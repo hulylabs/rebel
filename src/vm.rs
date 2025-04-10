@@ -1,6 +1,6 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use crate::mem::{Memory, MemoryError, Offset, Series, Type, Value, Word};
+use crate::mem::{Block, Memory, MemoryError, Offset, Series, Type, Value, Word};
 use crate::parse::{Collector, Parser, WordKind};
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
@@ -11,18 +11,21 @@ pub enum VmError {
     ParserError(#[from] crate::parse::ParserError<MemoryError>),
     #[error(transparent)]
     MemoryError(#[from] MemoryError),
+    #[error("Invalid code")]
+    InvalidCode,
 }
 
 //
 
 type Op = Word;
-// pub type CodeBlock = Series<Code>;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable, PartialEq, Eq)]
 pub struct Code(Op, Word);
 
 impl Code {
+    const SIZE_IN_WORDS: Offset = 2;
+
     // const HALT: Op = 0;
     const CONST: Op = 1;
     const TYPE: Op = 2;
@@ -33,6 +36,14 @@ impl Code {
 
     pub fn new(op: Op, data: Word) -> Self {
         Code(op, data)
+    }
+
+    pub fn op(&self) -> Op {
+        self.0
+    }
+
+    pub fn data(&self) -> Word {
+        self.1
     }
 }
 
@@ -109,8 +120,6 @@ impl<'a> Process<'a> {
             }
 
             let value = self.memory.get::<Value>(ip)?;
-            println!("value: {:?}", value);
-
             match value.kind() {
                 Value::WORD => {
                     let code = Code::new(Code::WORD, value.data());
@@ -121,14 +130,15 @@ impl<'a> Process<'a> {
                     let code = Code::new(Code::SET_WORD, value.data());
                     let defer = Defer::new(code, stack_len, 1);
                     self.memory.push(self.defer_stack, defer)?;
-                    println!("defer: {:?}", defer);
                 }
                 _ => {
-                    let data = value.data();
-                    self.memory
-                        .push(self.code_stack, Code::new(Code::TYPE, value.kind()))?;
-                    self.memory
-                        .push(self.code_stack, Code::new(Code::CONST, data))?;
+                    self.memory.push_all(
+                        self.code_stack,
+                        &[
+                            Code::new(Code::TYPE, value.kind()),
+                            Code::new(Code::CONST, value.data()),
+                        ],
+                    )?;
                     stack_len += 1;
                 }
             }
@@ -152,6 +162,29 @@ impl<'a> Process<'a> {
             }
         }
         Ok(self.memory.drain(self.code_stack, 0)?)
+    }
+
+    pub fn exec(&mut self, code: Series<Code>) -> Result<(), VmError> {
+        let mut ip = code.address() + Block::SIZE_IN_WORDS;
+        let end = ip + self.memory.len(code)? * Code::SIZE_IN_WORDS;
+
+        let mut kind = Value::NONE;
+
+        while ip < end {
+            let code = self.memory.get::<Code>(ip)?;
+            match code {
+                Code(Code::TYPE, typ) => kind = *typ,
+                Code(Code::CONST, value) => {
+                    self.memory.push(self.stack, Value::new(kind, *value))?
+                }
+                Code(Code::LEAVE, stack) => {}
+                _ => {
+                    return Err(VmError::InvalidCode);
+                }
+            }
+            ip += Code::SIZE_IN_WORDS;
+        }
+        Ok(())
     }
 }
 

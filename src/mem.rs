@@ -63,7 +63,7 @@ pub struct Block {
 }
 
 impl Block {
-    const SIZE_IN_WORDS: Offset = (std::mem::size_of::<Block>() / SIZE_OF_WORD) as Offset;
+    pub const SIZE_IN_WORDS: Offset = (std::mem::size_of::<Block>() / SIZE_OF_WORD) as Offset;
 
     /// Returns the current number of items in the block
     pub fn len(&self) -> Offset {
