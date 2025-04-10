@@ -3,3 +3,4 @@ pub mod helpers;
 pub mod mem_tests;
 pub mod parse_test;
 pub mod vm_test;
+pub mod compile_test;
