@@ -132,7 +132,7 @@ impl<'a> Process<'a> {
                     self.memory.push(self.defer_stack, defer)?;
                 }
                 _ => {
-                    self.memory.push_all(
+                    self.memory.push_n(
                         self.code_stack,
                         &[
                             Code::new(Code::TYPE, value.kind()),
@@ -147,7 +147,7 @@ impl<'a> Process<'a> {
         // fix stack
         match stack_len {
             0 => {
-                self.memory.push_all(
+                self.memory.push_n(
                     self.code_stack,
                     &[
                         Code::new(Code::TYPE, Value::NONE),
