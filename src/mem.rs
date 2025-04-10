@@ -5,6 +5,8 @@ use bytemuck::{
     AnyBitPattern, NoUninit, Pod, PodCastError, Zeroable, cast_slice, cast_slice_mut,
     try_cast_slice, try_cast_slice_mut, try_from_bytes, try_from_bytes_mut,
 };
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use thiserror::Error;
 
@@ -125,8 +127,8 @@ pub type String = Series<u8>;
 //
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
-pub struct Value(Type, Word);
+#[derive(Debug, Clone, Copy, Pod, Zeroable, PartialEq, Eq)]
+pub struct Value(pub Type, pub Word);
 
 impl Value {
     pub const SIZE_IN_WORDS: Offset = (std::mem::size_of::<Value>() / SIZE_OF_WORD) as Offset;
@@ -275,6 +277,7 @@ impl Value {
 pub struct MemHeader {
     dead_beef: Word,
     heap_top: Address,
+    symbol_table: Address,
 }
 
 pub struct Memory {
@@ -286,15 +289,19 @@ fn podcast_error(_err: PodCastError) -> MemoryError {
 }
 
 impl Memory {
-    pub fn new(size: usize) -> Self {
+    pub fn new(size: usize) -> Result<Self, MemoryError> {
         let words = vec![0u32; size].into_boxed_slice();
         let mut memory = Self { memory: words };
 
-        let header = memory.get_mut::<MemHeader>(0).unwrap();
+        let header = memory.get_mut::<MemHeader>(0)?;
         header.dead_beef = 0xDEADBEEF;
         header.heap_top = std::mem::size_of::<MemHeader>() as Address;
 
-        memory
+        let symbol_table = memory.alloc::<Address>(1024)?.address;
+        let header = memory.get_mut::<MemHeader>(0)?;
+        header.symbol_table = symbol_table;
+
+        Ok(memory)
     }
 
     fn alloc_words(&mut self, words: Offset) -> Result<Address, MemoryError> {
@@ -362,7 +369,6 @@ impl Memory {
             .ok_or(MemoryError::OutOfBounds)
     }
 
-    #[allow(dead_code)]
     fn get_items_slice<I: AnyBitPattern>(
         &self,
         address: Address,
@@ -405,6 +411,17 @@ impl Memory {
         }
 
         Ok(String::new(address))
+    }
+
+    pub fn get_string(&self, address: Address) -> Result<&str, MemoryError> {
+        let block = self.get::<Block>(address)?;
+        let len = block.len as usize;
+        let size_in_words = len.div_ceil(SIZE_OF_WORD);
+        let words_slice = self.get_words_slice(address, 0..size_in_words as Offset)?;
+        let bytes_slice = try_cast_slice(words_slice).map_err(podcast_error)?;
+        let bytes = &bytes_slice[..len];
+        let string = unsafe { std::str::from_utf8_unchecked(bytes) };
+        Ok(string)
     }
 
     pub fn get<I: AnyBitPattern>(&self, address: Address) -> Result<&I, MemoryError> {
@@ -517,6 +534,20 @@ impl Memory {
         }
     }
 
+    pub fn peek_at<I: AnyBitPattern>(
+        &self,
+        series: Series<I>,
+        pos: Offset,
+    ) -> Result<&[I], MemoryError> {
+        let block = self.get::<Block>(series.address)?;
+        let len = block.len;
+        if pos >= len {
+            Err(MemoryError::OutOfBounds)
+        } else {
+            self.get_items_slice(series.address, pos..len)
+        }
+    }
+
     pub fn drain<I: AnyBitPattern + NoUninit>(
         &mut self,
         from: Series<I>,
@@ -551,6 +582,49 @@ impl Memory {
 
         self.memory.copy_within(start..end, dst);
         Ok(Series::new(to_address))
+    }
+
+    pub fn get_or_add_symbol(&mut self, symbol: &str) -> Result<Series<u8>, MemoryError> {
+        let header = self.get_mut::<MemHeader>(0)?;
+        let symbol_table = header.symbol_table;
+
+        let block = self.get::<Block>(symbol_table)?;
+        let cap = block.cap - Block::SIZE_IN_WORDS;
+        let len = block.len;
+
+        let hash_code = {
+            let mut hasher = DefaultHasher::new();
+            symbol.hash(&mut hasher);
+            hasher.finish() as u32
+        };
+
+        let start = hash_code % cap;
+        let mut idx = start;
+        loop {
+            let item = self.get::<Address>(symbol_table + Block::SIZE_IN_WORDS + idx)?;
+            if *item == 0 {
+                let string = self.alloc_string(symbol)?;
+                let item = self.get_mut::<Address>(symbol_table + Block::SIZE_IN_WORDS + idx)?;
+                *item = string.address();
+
+                let block = self.get_mut::<Block>(symbol_table)?;
+                block.len = len + 1;
+
+                return Ok(string);
+            } else {
+                let string = self.get_string(*item)?;
+                if string == symbol {
+                    return Ok(Series::new(*item));
+                }
+                idx += 1;
+                if idx >= cap {
+                    idx = 0;
+                }
+                if idx == start {
+                    return Err(MemoryError::OutOfMemory);
+                }
+            }
+        }
     }
 }
 
