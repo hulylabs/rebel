@@ -29,6 +29,7 @@ impl Code {
     const WORD: Op = 3;
     const SET_WORD: Op = 4;
     const CALL_NATIVE: Op = 5;
+    const LEAVE: Op = 6;
 
     pub fn new(op: Op, data: Word) -> Self {
         Code(op, data)
@@ -129,6 +130,23 @@ impl<'a> Process<'a> {
                 }
             }
             ip += Value::SIZE_IN_WORDS;
+        }
+        // fix stack
+        match stack_len {
+            0 => {
+                self.memory.push_all(
+                    self.code_stack,
+                    &[
+                        Code::new(Code::TYPE, Value::NONE),
+                        Code::new(Code::CONST, 0),
+                    ],
+                )?;
+            }
+            1 => {}
+            n => {
+                self.memory
+                    .push(self.code_stack, Code::new(Code::LEAVE, n - 1))?;
+            }
         }
         Ok(self.memory.drain(self.code_stack, 0)?)
     }
