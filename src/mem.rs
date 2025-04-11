@@ -33,7 +33,7 @@ pub type Address = Word;
 pub type Offset = Word;
 pub type Type = Offset;
 
-const SIZE_OF_WORD: usize = std::mem::size_of::<Word>();
+// const SIZE_OF_WORD: usize = std::mem::size_of::<Word>();
 
 //
 
@@ -60,12 +60,12 @@ const SIZE_OF_WORD: usize = std::mem::size_of::<Word>();
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct Block {
-    cap: Offset, // Total capacity in 32-bit words, including the header
+    cap: Offset, // Total capacity in bytes, including the header (word-aligned)
     len: Offset, // Number of items currently in the block
 }
 
 impl Block {
-    pub const SIZE_IN_WORDS: Offset = (std::mem::size_of::<Block>() / SIZE_OF_WORD) as Offset;
+    pub const SIZE: Offset = std::mem::size_of::<Block>() as Offset;
 
     /// Returns the current number of items in the block
     pub fn len(&self) -> Offset {
@@ -131,7 +131,7 @@ impl<T> Series<T> {
 pub struct Value(pub Type, pub Word);
 
 impl Value {
-    pub const SIZE_IN_WORDS: Offset = (std::mem::size_of::<Value>() / SIZE_OF_WORD) as Offset;
+    pub const SIZE: Offset = std::mem::size_of::<Value>() as Offset;
 
     pub const NONE: Type = 0;
     pub const INT: Type = 1;
@@ -284,10 +284,6 @@ pub struct KeyValue {
     value: Value,
 }
 
-impl KeyValue {
-    const SIZE_IN_WORDS: Offset = (std::mem::size_of::<KeyValue>() / SIZE_OF_WORD) as Offset;
-}
-
 //
 
 #[repr(C)]
@@ -300,7 +296,7 @@ pub struct MemHeader {
 }
 
 pub struct Memory {
-    memory: Box<[Word]>,
+    memory: Box<[u8]>,
 }
 
 fn podcast_error(_err: PodCastError) -> MemoryError {
@@ -309,8 +305,8 @@ fn podcast_error(_err: PodCastError) -> MemoryError {
 
 impl Memory {
     pub fn new(size: usize) -> Result<Self, MemoryError> {
-        let words = vec![0u32; size].into_boxed_slice();
-        let mut memory = Self { memory: words };
+        let bytes = vec![0u8; size].into_boxed_slice();
+        let mut memory = Self { memory: bytes };
 
         let header = memory.get_mut::<MemHeader>(0)?;
         header.dead_beef = 0xDEADBEEF;
@@ -327,9 +323,14 @@ impl Memory {
         Ok(memory)
     }
 
-    fn alloc_words(&mut self, words: Offset) -> Result<Address, MemoryError> {
+    fn heap_alloc(
+        &mut self,
+        size_in_bytes: Offset,
+        init_len: Offset,
+    ) -> Result<Address, MemoryError> {
         let len = self.memory.len() as Offset;
-        let cap = Block::SIZE_IN_WORDS + words;
+        let cap = Block::SIZE + size_in_bytes;
+        let cap = (cap + 3) & !3;
         let header = self.get_mut::<MemHeader>(0)?;
         let heap_top = header.heap_top;
         let new_heap_top = heap_top + cap;
@@ -339,7 +340,7 @@ impl Memory {
             header.heap_top = new_heap_top;
             let block = self.get_mut::<Block>(heap_top)?;
             block.cap = cap;
-            block.len = 0;
+            block.len = init_len;
             Ok(heap_top)
         }
     }
@@ -353,40 +354,47 @@ impl Memory {
     ///
     /// For types smaller than a word (like u8), multiple items can be stored per word.
     /// For types larger than a word (like Value), multiple words are needed per item.
-    pub fn alloc<I>(&mut self, cap: Offset) -> Result<Series<I>, MemoryError> {
-        // Calculate bytes needed for all items
-        let item_size_bytes = std::mem::size_of::<I>();
-        let total_bytes_needed = item_size_bytes * cap as usize;
+    pub fn alloc<I>(&mut self, items: Offset) -> Result<Series<I>, MemoryError> {
+        let item_size = std::mem::size_of::<I>() as Offset;
+        let address = self.heap_alloc(item_size * items, 0)?;
+        Ok(Series::new(address))
+    }
 
-        // Round up to whole words (4-byte units)
-        let bytes_per_word = SIZE_OF_WORD;
-        let words_needed = total_bytes_needed.div_ceil(bytes_per_word);
+    pub fn alloc_items<I: NoUninit + AnyBitPattern>(
+        &mut self,
+        items: &[I],
+    ) -> Result<Series<I>, MemoryError> {
+        let len = items.len() as Offset;
+        let size_in_bytes = len * std::mem::size_of::<I>() as Offset;
+        let address = self.heap_alloc(size_in_bytes, len)?;
 
-        // Allocate the block with header + data
-        let address = self.alloc_words(words_needed as Offset)?;
+        let bytes = self.get_byte_slice_mut(address, 0..size_in_bytes)?;
+        let target = try_cast_slice_mut(bytes).map_err(podcast_error)?;
+
+        let iter = target.iter_mut().zip(items.iter());
+        for (dst, src) in iter {
+            *dst = *src
+        }
+
         Ok(Series::new(address))
     }
 
     #[allow(dead_code)]
-    fn get_words_slice(
-        &self,
-        address: Address,
-        range: Range<Offset>,
-    ) -> Result<&[Word], MemoryError> {
-        let start = address + Block::SIZE_IN_WORDS + range.start;
-        let end = address + Block::SIZE_IN_WORDS + range.end;
+    fn get_byte_slice(&self, address: Address, range: Range<Offset>) -> Result<&[u8], MemoryError> {
+        let start = address + Block::SIZE + range.start;
+        let end = address + Block::SIZE + range.end;
         self.memory
             .get(start as usize..end as usize)
             .ok_or(MemoryError::OutOfBounds)
     }
 
-    fn get_words_slice_mut(
+    fn get_byte_slice_mut(
         &mut self,
         address: Address,
         range: Range<Offset>,
-    ) -> Result<&mut [Word], MemoryError> {
-        let start = address + Block::SIZE_IN_WORDS + range.start;
-        let end = address + Block::SIZE_IN_WORDS + range.end;
+    ) -> Result<&mut [u8], MemoryError> {
+        let start = address + Block::SIZE + range.start;
+        let end = address + Block::SIZE + range.end;
         self.memory
             .get_mut(start as usize..end as usize)
             .ok_or(MemoryError::OutOfBounds)
@@ -397,11 +405,10 @@ impl Memory {
         address: Address,
         range: Range<Offset>,
     ) -> Result<&[I], MemoryError> {
-        let size_in_words = std::mem::size_of::<I>() / SIZE_OF_WORD;
-        let size_in_words = size_in_words as Offset;
-        let range = range.start * size_in_words..range.end * size_in_words;
-        let words_slice = self.get_words_slice(address, range)?;
-        try_cast_slice(words_slice).map_err(podcast_error)
+        let item_size = std::mem::size_of::<I>() as Offset;
+        let range = range.start * item_size..range.end * item_size;
+        let bytes = self.get_byte_slice(address, range)?;
+        try_cast_slice(bytes).map_err(podcast_error)
     }
 
     fn get_items_slice_mut<I: AnyBitPattern + NoUninit>(
@@ -409,59 +416,36 @@ impl Memory {
         address: Address,
         range: Range<Offset>,
     ) -> Result<&mut [I], MemoryError> {
-        let size_in_words = std::mem::size_of::<I>() / SIZE_OF_WORD;
-        let size_in_words = size_in_words as Offset;
-        let range = range.start * size_in_words..range.end * size_in_words;
-        let words_slice = self.get_words_slice_mut(address, range)?;
-        try_cast_slice_mut(words_slice).map_err(podcast_error)
+        let item_size = std::mem::size_of::<I>() as Offset;
+        let range = range.start * item_size..range.end * item_size;
+        let bytes = self.get_byte_slice_mut(address, range)?;
+        try_cast_slice_mut(bytes).map_err(podcast_error)
     }
 
     pub fn alloc_string(&mut self, string: &str) -> Result<Series<u8>, MemoryError> {
-        self.alloc_bytes(string.as_bytes())
+        self.alloc_items(string.as_bytes())
     }
 
-    pub fn alloc_bytes(&mut self, bytes: &[u8]) -> Result<Series<u8>, MemoryError> {
-        let size = bytes.len();
-
-        let size_in_words = size.div_ceil(SIZE_OF_WORD);
-        let size_in_words = size_in_words as Offset;
-        let address = self.alloc_words(size_in_words)?;
-        let block = self.get_mut::<Block>(address)?;
-        block.len = size as Offset;
-
-        let words_slice = self.get_words_slice_mut(address, 0..size_in_words)?;
-        let bytes_slice = cast_slice_mut(words_slice);
-        let iter = bytes.iter().zip(bytes_slice.iter_mut());
-        for (src, dst) in iter {
-            *dst = *src
-        }
-
-        Ok(Series::new(address))
-    }
-
-    pub fn get_string(&self, address: Address) -> Result<&str, MemoryError> {
-        let bytes = self.get_bytes(address)?;
+    pub fn get_string(&self, string: Series<u8>) -> Result<&str, MemoryError> {
+        let bytes = self.get_items(string)?;
         let string = unsafe { std::str::from_utf8_unchecked(bytes) };
         Ok(string)
     }
 
-    pub fn get_bytes(&self, address: Address) -> Result<&[u8], MemoryError> {
+    pub fn get_items<I: AnyBitPattern>(&self, series: Series<I>) -> Result<&[I], MemoryError> {
+        let address = series.address;
         let block = self.get::<Block>(address)?;
-        let len = block.len as usize;
-        let size_in_words = len.div_ceil(SIZE_OF_WORD);
-        let words_slice = self.get_words_slice(address, 0..size_in_words as Offset)?;
-        let bytes_slice = try_cast_slice(words_slice).map_err(podcast_error)?;
-        Ok(&bytes_slice[..len])
+        let len = block.len;
+        self.get_items_slice(address, 0..len)
     }
 
     pub fn get<I: AnyBitPattern>(&self, address: Address) -> Result<&I, MemoryError> {
         let address = address as usize;
-        let size_in_words = std::mem::size_of::<I>() / std::mem::size_of::<Word>();
-        let words_slice = self
+        let bytes = self
             .memory
-            .get(address..address + size_in_words)
+            .get(address..address + std::mem::size_of::<I>())
             .ok_or(MemoryError::OutOfBounds)?;
-        try_from_bytes(cast_slice(words_slice)).map_err(podcast_error)
+        try_from_bytes(bytes).map_err(podcast_error)
     }
 
     pub fn get_mut<I: AnyBitPattern + NoUninit>(
@@ -469,17 +453,15 @@ impl Memory {
         address: Address,
     ) -> Result<&mut I, MemoryError> {
         let address = address as usize;
-        let size_in_words = std::mem::size_of::<I>() / std::mem::size_of::<Word>();
-        let words_slice = self
+        let bytes = self
             .memory
-            .get_mut(address..address + size_in_words)
+            .get_mut(address..address + std::mem::size_of::<I>())
             .ok_or(MemoryError::OutOfBounds)?;
-        try_from_bytes_mut(cast_slice_mut(words_slice)).map_err(podcast_error)
+        try_from_bytes_mut(bytes).map_err(podcast_error)
     }
 
     pub fn len<I>(&self, series: Series<I>) -> Result<Offset, MemoryError> {
-        let block = self.get::<Block>(series.address)?;
-        Ok(block.len)
+        self.get::<Offset>(series.address + 4).copied()
     }
 
     pub fn push<I: AnyBitPattern + NoUninit>(
@@ -487,19 +469,16 @@ impl Memory {
         series: Series<I>,
         value: I,
     ) -> Result<(), MemoryError> {
-        let item_size = std::mem::size_of::<I>() / SIZE_OF_WORD;
-        let item_size = item_size as Offset;
         let block = self.get_mut::<Block>(series.address)?;
-
         let len = block.len;
+        let item_size = std::mem::size_of::<I>() as Offset;
         let item_start = len * item_size;
         let item_end = item_start + item_size;
-
         if block.cap < item_end {
             Err(MemoryError::StackOverflow)
         } else {
             block.len = len + 1;
-            let item = self.get_mut::<I>(series.address + Block::SIZE_IN_WORDS + item_start)?;
+            let item = self.get_mut::<I>(series.address + Block::SIZE + item_start)?;
             *item = value;
             Ok(())
         }
@@ -514,14 +493,14 @@ impl Memory {
         let cap = block.cap;
         let len = block.len;
 
-        let item_size = (std::mem::size_of::<I>() / SIZE_OF_WORD) as Offset;
-        let cap_items = (cap - Block::SIZE_IN_WORDS) / item_size;
+        let item_size = std::mem::size_of::<I>() as Offset;
+        let cap_items = (cap - Block::SIZE) / item_size;
         let items_len = values.len() as Offset;
+        let new_len = len + items_len;
 
-        if len + items_len > cap_items {
+        if new_len > cap_items {
             Err(MemoryError::StackOverflow)
         } else {
-            let new_len = len + items_len;
             block.len = new_len;
             let items = self.get_items_slice_mut(series.address, len..new_len)?;
             let iter = items.iter_mut().zip(values.iter());
@@ -541,10 +520,11 @@ impl Memory {
         let cap = block.cap;
         let len = block.len;
 
-        let item_size = (std::mem::size_of::<I>() / SIZE_OF_WORD) as Offset;
-        let cap_items = (cap - Block::SIZE_IN_WORDS) / item_size;
+        let item_size = std::mem::size_of::<I>() as Offset;
+        let cap_items = (cap - Block::SIZE) / item_size;
+        let items_len = N as Offset;
+        let new_len = len + items_len;
 
-        let new_len = len + (N as Offset);
         if new_len > cap_items {
             Err(MemoryError::StackOverflow)
         } else {
@@ -561,33 +541,29 @@ impl Memory {
     }
 
     pub fn pop<I: AnyBitPattern>(&mut self, series: Series<I>) -> Result<I, MemoryError> {
-        let item_size = std::mem::size_of::<I>() / SIZE_OF_WORD;
-        let item_size = item_size as Offset;
+        let item_size = std::mem::size_of::<I>() as Offset;
         let block = self.get_mut::<Block>(series.address)?;
-
         let len = block.len;
         let new_len = len.checked_sub(1).ok_or(MemoryError::StackUnderflow)?;
-        // To pop from the end of the stack, we need to use new_len (len-1)
+
         let item_start = new_len * item_size;
 
         block.len = new_len;
-        self.get::<I>(series.address + Block::SIZE_IN_WORDS + item_start)
+        self.get::<I>(series.address + Block::SIZE + item_start)
             .copied()
     }
 
     pub fn peek<I: AnyBitPattern>(&self, series: Series<I>) -> Result<Option<&I>, MemoryError> {
-        let item_size = std::mem::size_of::<I>() / SIZE_OF_WORD;
-        let item_size = item_size as Offset;
+        let item_size = std::mem::size_of::<I>() as Offset;
         let block = self.get::<Block>(series.address)?;
-
         let len = block.len;
+
         if len == 0 {
             Ok(None)
         } else {
             let item_offset = len - 1;
             let item_start = item_offset * item_size;
-
-            self.get::<I>(series.address + Block::SIZE_IN_WORDS + item_start)
+            self.get::<I>(series.address + Block::SIZE + item_start)
                 .map(Some)
         }
     }
@@ -611,30 +587,30 @@ impl Memory {
         from: Series<I>,
         pos: Offset,
     ) -> Result<Series<I>, MemoryError> {
-        let item_size = std::mem::size_of::<I>() / SIZE_OF_WORD;
-        let item_size = item_size as Offset;
+        let item_size = std::mem::size_of::<I>() as Offset;
 
         let from_block = self.get_mut::<Block>(from.address)?;
         let from_len = from_block.len;
         let copy_len = from_len - pos;
         from_block.len = pos;
 
-        let copy_words = copy_len * item_size;
-        let to_address = self.alloc_words(copy_words)?;
-        let to_block = self.get_mut::<Block>(to_address)?;
-        to_block.len = copy_len;
+        let copy_bytes = copy_len * item_size;
+        let to_address = self.heap_alloc(copy_bytes, copy_len)?;
 
-        let items_start = (from.address + Block::SIZE_IN_WORDS) as usize;
-        let start = items_start + (pos * item_size) as usize;
-        let copy_words = copy_words as usize;
+        let start = from.address + Block::SIZE + (pos * item_size);
+        let end = start + copy_bytes;
+        let start = start as usize;
+        let end = end as usize;
 
-        let end = start + copy_words;
         if end > self.memory.len() {
             return Err(MemoryError::OutOfBounds);
         }
 
-        let dst = (to_address + Block::SIZE_IN_WORDS) as usize;
-        if dst > self.memory.len() - copy_words {
+        let dst = to_address + Block::SIZE;
+        let dst = dst as usize;
+        let copy_bytes = copy_bytes as usize;
+
+        if dst > self.memory.len() - copy_bytes {
             return Err(MemoryError::OutOfBounds);
         }
 
@@ -656,8 +632,10 @@ impl Memory {
         let header = self.get_mut::<MemHeader>(0)?;
         let symbol_table = header.symbol_table;
 
+        let size_of_symbol = std::mem::size_of::<Address>() as Offset;
+
         let block = self.get::<Block>(symbol_table)?;
-        let cap = block.cap - Block::SIZE_IN_WORDS;
+        let cap = (block.cap - Block::SIZE) / size_of_symbol;
         if cap == 0 {
             return Err(MemoryError::OutOfMemory);
         }
@@ -671,10 +649,11 @@ impl Memory {
         let start = hash_code % cap;
         let mut idx = start;
         loop {
-            let item = self.get::<Address>(symbol_table + Block::SIZE_IN_WORDS + idx)?;
+            let item = self.get::<Address>(symbol_table + Block::SIZE + idx * size_of_symbol)?;
             if *item == 0 {
                 let string = self.alloc_string(symbol)?;
-                let item = self.get_mut::<Address>(symbol_table + Block::SIZE_IN_WORDS + idx)?;
+                let item =
+                    self.get_mut::<Address>(symbol_table + Block::SIZE + idx * size_of_symbol)?;
                 *item = string.address();
 
                 let block = self.get_mut::<Block>(symbol_table)?;
@@ -682,7 +661,7 @@ impl Memory {
 
                 return Ok(string);
             } else {
-                let string = self.get_string(*item)?;
+                let string = self.get_string(Series::new(*item))?;
                 if string == symbol {
                     return Ok(Series::new(*item));
                 }
@@ -700,11 +679,13 @@ impl Memory {
     const PHI: u32 = 0x9e3779b9;
 
     pub fn get_word(&self, symbol: Address) -> Result<Value, MemoryError> {
+        const KV_SIZE: Offset = std::mem::size_of::<KeyValue>() as Offset;
+
         let header = self.get::<MemHeader>(0)?;
         let system_words = header.system_words;
 
         let block = self.get::<Block>(system_words)?;
-        let cap = block.cap - Block::SIZE_IN_WORDS;
+        let cap = (block.cap - Block::SIZE) / KV_SIZE;
         if cap == 0 {
             return Err(MemoryError::WordNotFound);
         }
@@ -713,7 +694,7 @@ impl Memory {
         let start = hash_code % cap;
         let mut idx = start;
         loop {
-            let offset = system_words + Block::SIZE_IN_WORDS + idx * KeyValue::SIZE_IN_WORDS;
+            let offset = system_words + Block::SIZE + idx * KV_SIZE;
             let item = self.get::<KeyValue>(offset)?;
             if item.key == symbol {
                 return Ok(item.value);
@@ -737,11 +718,13 @@ impl Memory {
     }
 
     pub fn set_word(&mut self, symbol: Address, value: Value) -> Result<(), MemoryError> {
+        const KV_SIZE: Offset = std::mem::size_of::<KeyValue>() as Offset;
+
         let header = self.get_mut::<MemHeader>(0)?;
         let system_words = header.system_words;
 
         let block = self.get::<Block>(system_words)?;
-        let cap = block.cap - Block::SIZE_IN_WORDS;
+        let cap = (block.cap - Block::SIZE) / KV_SIZE;
         if cap == 0 {
             return Err(MemoryError::OutOfMemory);
         }
@@ -750,7 +733,7 @@ impl Memory {
         let start = hash_code % cap;
         let mut idx = start;
         loop {
-            let offset = system_words + Block::SIZE_IN_WORDS + idx * KeyValue::SIZE_IN_WORDS;
+            let offset = system_words + Block::SIZE + idx * KV_SIZE;
             let item = self.get_mut::<KeyValue>(offset)?;
             if item.key == symbol {
                 item.value = value;
@@ -774,38 +757,6 @@ impl Memory {
     }
 }
 
-// These functions are only used in tests but need to be public
-
-/// Returns the capacity of a block in items (not including header size)
-///
-/// This calculates how many items of type I can fit in the block's data area.
-/// Note that this is different from the block's `cap` field, which is in words.
-///
-/// Only for testing - not part of the stable API.
-#[doc(hidden)]
-pub fn capacity_in_items<I>(memory: &Memory, series: Series<I>) -> Result<Offset, MemoryError> {
-    let block = memory.get::<Block>(series.address)?;
-
-    // Calculate total available space in bytes (excluding header)
-    let data_words = block.cap - Block::SIZE_IN_WORDS;
-    let data_bytes = data_words as usize * SIZE_OF_WORD;
-
-    // Calculate how many items of type I can fit in that many bytes
-    let item_size_bytes = std::mem::size_of::<I>();
-    let capacity_in_items = data_bytes / item_size_bytes;
-
-    Ok(capacity_in_items as Offset)
-}
-
-/// Returns the total size of a block in words (including header)
-///
-/// Only for testing - not part of the stable API.
-#[doc(hidden)]
-pub fn block_size_in_words<I>(memory: &Memory, series: Series<I>) -> Result<Offset, MemoryError> {
-    let block = memory.get::<Block>(series.address)?;
-    Ok(block.cap)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -814,8 +765,8 @@ mod tests {
     fn test_bytes_allocation() -> Result<(), MemoryError> {
         let mut memory = Memory::new(65536)?;
         let data = b"Hello, world!";
-        let series = memory.alloc_bytes(data)?;
-        let bytes = memory.get_bytes(series.address)?;
+        let series = memory.alloc_items(data)?;
+        let bytes = memory.get_items(series)?;
         assert_eq!(bytes, data);
         Ok(())
     }

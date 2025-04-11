@@ -1,6 +1,6 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use crate::mem::{Address, Memory, MemoryError, Offset, Series, Type, Value, Word};
+use crate::mem::{Address, Block, Memory, MemoryError, Offset, Series, Type, Value, Word};
 use crate::parse::{Collector, Parser, WordKind};
 use thiserror::Error;
 
@@ -228,8 +228,9 @@ impl<'a> Process<'a> {
         let mut defer_stack = ArrayStack::<Defer, 64>::new();
         let mut code_stack = ArrayStack::<u8, 512>::new();
 
-        let mut ip = block.address() + Value::SIZE_IN_WORDS;
-        let end = ip + self.vm.memory.len(block)? * Value::SIZE_IN_WORDS;
+        let len = self.vm.memory.len(block)?;
+        let mut ip = block.address() + Block::SIZE;
+        let end = ip + len * Value::SIZE;
         let mut stack_len = 0;
 
         while ip < end {
@@ -266,7 +267,7 @@ impl<'a> Process<'a> {
                     stack_len += 1;
                 }
             }
-            ip += Value::SIZE_IN_WORDS;
+            ip += Value::SIZE;
         }
         // fix stack
         match stack_len {
@@ -275,7 +276,7 @@ impl<'a> Process<'a> {
             n => code_stack.extend(&[Code::LEAVE, (n - 1) as u8])?,
         }
 
-        self.vm.memory.alloc_bytes(code_stack.as_slice()?)
+        self.vm.memory.alloc_items(code_stack.as_slice()?)
     }
 
     // pub fn exec(&mut self, code_block: Series<u8>) -> Result<Value, VmError> {
@@ -621,7 +622,7 @@ mod tests {
 
         let block = process.parse_block("1 2 3")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.get_bytes(code_block.address())?;
+        let code = vm.memory.get_items(code_block)?;
 
         match code {
             [
@@ -660,7 +661,7 @@ mod tests {
 
         let block = process.parse_block("x: 5 x")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.get_bytes(code_block.address())?;
+        let code = vm.memory.get_items(code_block)?;
 
         match code {
             [
@@ -703,7 +704,7 @@ mod tests {
 
         let block = process.parse_block("x: y: z: 42 y")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.get_bytes(code_block.address())?;
+        let code = vm.memory.get_items(code_block)?;
 
         match code {
             [
@@ -760,7 +761,7 @@ mod tests {
 
         let block = process.parse_block("")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.get_bytes(code_block.address())?;
+        let code = vm.memory.get_items(code_block)?;
 
         match code {
             [Code::NONE] => {}
