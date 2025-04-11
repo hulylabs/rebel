@@ -134,6 +134,47 @@ where
     }
 }
 
+struct CodeReader<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> CodeReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    fn read_code(&mut self) -> Result<Option<u8>, MemoryError> {
+        Ok(self.data.get(self.pos).copied().map(|byte| {
+            self.pos += 1;
+            byte
+        }))
+    }
+
+    fn read_u8(&mut self) -> Result<u8, MemoryError> {
+        self.data
+            .get(self.pos)
+            .copied()
+            .map(|byte| {
+                self.pos += 1;
+                byte
+            })
+            .ok_or(MemoryError::OutOfBounds)
+    }
+
+    fn read_u32(&mut self) -> Result<u32, MemoryError> {
+        self.data
+            .get(self.pos..self.pos + 4)
+            .and_then(|slice| slice.try_into().ok())
+            .map(|bytes| {
+                let value = u32::from_ne_bytes(bytes);
+                self.pos += 4;
+                value
+            })
+            .ok_or(MemoryError::OutOfBounds)
+    }
+}
+
 //
 
 pub struct Process<'a> {
@@ -237,29 +278,36 @@ impl<'a> Process<'a> {
         self.vm.memory.alloc_bytes(code_stack.as_slice()?)
     }
 
-    // pub fn exec(&mut self, code: Series<Code>) -> Result<Value, VmError> {
-    //     let mut ip = code.address() + Block::SIZE_IN_WORDS;
-    //     let end = ip + self.vm.memory.len(code)? * Code::SIZE_IN_WORDS;
+    // pub fn exec(&mut self, code_block: Series<u8>) -> Result<Value, VmError> {
+    //     // let mut ip = code.address() + Block::SIZE_IN_WORDS;
+    //     // let end = ip + self.vm.memory.len(code)? * Code::SIZE_IN_WORDS;
 
-    //     let mut kind = Value::NONE;
+    //     // let mut kind = Value::NONE;
 
-    //     while ip < end {
-    //         let code = *self.vm.memory.get::<Code>(ip)?;
-    //         match code {
-    //             Code(Code::TYPE, typ) => kind = typ,
-    //             Code(Code::CONST, value) => {
-    //                 self.vm.memory.push(self.stack, Value::new(kind, value))?
+    //     let code = self.vm.memory.get_bytes(code_block.address())?;
+    //     let mut reader = CodeReader::new(code);
+
+    //     while let Some(op) = reader.read_code()? {
+    //         match op {
+    //             Code::CONST => {
+    //                 let kind = reader.read_u8()? as Word;
+    //                 self.vm
+    //                     .memory
+    //                     .push(self.stack, Value::new(kind, reader.read_u32()?))?
     //             }
-    //             Code(Code::WORD, symbol) => {
+    //             Code::WORD => {
+    //                 let symbol = reader.read_u32()?;
     //                 let value = self.vm.memory.get_word(symbol)?;
     //                 self.vm.memory.push(self.stack, value)?;
     //             }
-    //             Code(Code::SET_WORD, symbol) => {
+    //             Code::SET_WORD => {
+    //                 let symbol = reader.read_u32()?;
     //                 let value = self.vm.memory.peek(self.stack)?.copied();
     //                 let value = value.ok_or(MemoryError::StackUnderflow)?;
     //                 self.vm.memory.set_word(symbol, value)?;
     //             }
-    //             Code(Code::LEAVE, drop) => {
+    //             Code::LEAVE => {
+    //                 let drop = reader.read_u8()? as Word;
     //                 let value = self.vm.memory.pop(self.stack)?;
     //                 self.vm.memory.drop(self.stack, drop)?;
     //                 self.vm.memory.push(self.stack, value)?;
@@ -268,7 +316,6 @@ impl<'a> Process<'a> {
     //                 return Err(VmError::InvalidCode);
     //             }
     //         }
-    //         ip += Code::SIZE_IN_WORDS;
     //     }
     //     self.vm.memory.pop(self.stack).map_err(Into::into)
     // }
