@@ -255,7 +255,7 @@ mod tests {
 
     // Helper function to create a test memory
     fn create_test_memory() -> Result<Memory, MemoryError> {
-        Memory::new(4096)
+        Memory::new(65536)
     }
 
     // Test basic block parsing with Process
