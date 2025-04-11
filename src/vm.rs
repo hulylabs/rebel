@@ -134,44 +134,30 @@ where
     }
 }
 
-struct CodeReader<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
+struct InstructionPointer(usize);
 
-impl<'a> CodeReader<'a> {
-    fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
+impl InstructionPointer {
+    fn new(code: Series<u8>) -> Self {
+        let ip = code.address() + Block::SIZE;
+        Self(ip as usize)
     }
 
-    fn read_code(&mut self) -> Result<Option<u8>, MemoryError> {
-        Ok(self.data.get(self.pos).copied().map(|byte| {
-            self.pos += 1;
-            byte
-        }))
+    fn read_code(&mut self, memory: &Memory) -> Option<u8> {
+        let result = memory.get_u8(self.0);
+        self.0 += 1;
+        result
     }
 
-    fn read_u8(&mut self) -> Result<u8, MemoryError> {
-        self.data
-            .get(self.pos)
-            .copied()
-            .map(|byte| {
-                self.pos += 1;
-                byte
-            })
-            .ok_or(MemoryError::OutOfBounds)
+    fn read_u8(&mut self, memory: &Memory) -> Result<u8, MemoryError> {
+        let result = memory.get_u8(self.0).ok_or(MemoryError::OutOfBounds)?;
+        self.0 += 1;
+        Ok(result)
     }
 
-    fn read_u32(&mut self) -> Result<u32, MemoryError> {
-        self.data
-            .get(self.pos..self.pos + 4)
-            .and_then(|slice| slice.try_into().ok())
-            .map(|bytes| {
-                let value = u32::from_ne_bytes(bytes);
-                self.pos += 4;
-                value
-            })
-            .ok_or(MemoryError::OutOfBounds)
+    fn read_u32(&mut self, memory: &Memory) -> Result<u32, MemoryError> {
+        let result = memory.get_u32_ne(self.0).ok_or(MemoryError::OutOfBounds)?;
+        self.0 += 4;
+        Ok(result)
     }
 }
 
@@ -275,51 +261,50 @@ impl<'a> Process<'a> {
             1 => {}
             n => code_stack.extend(&[Code::LEAVE, (n - 1) as u8])?,
         }
+        // code_stack.push(Code::HALT)?;
 
         self.vm.memory.alloc_items(code_stack.as_slice()?)
     }
 
-    // pub fn exec(&mut self, code_block: Series<u8>) -> Result<Value, VmError> {
-    //     // let mut ip = code.address() + Block::SIZE_IN_WORDS;
-    //     // let end = ip + self.vm.memory.len(code)? * Code::SIZE_IN_WORDS;
+    pub fn exec(&mut self, code_block: Series<u8>) -> Result<Value, VmError> {
+        let mut ip = InstructionPointer::new(code_block);
 
-    //     // let mut kind = Value::NONE;
+        // let code = self.vm.memory.get_bytes(code_block.address())?;
+        // let mut reader = CodeReader::new(code);
 
-    //     let code = self.vm.memory.get_bytes(code_block.address())?;
-    //     let mut reader = CodeReader::new(code);
-
-    //     while let Some(op) = reader.read_code()? {
-    //         match op {
-    //             Code::CONST => {
-    //                 let kind = reader.read_u8()? as Word;
-    //                 self.vm
-    //                     .memory
-    //                     .push(self.stack, Value::new(kind, reader.read_u32()?))?
-    //             }
-    //             Code::WORD => {
-    //                 let symbol = reader.read_u32()?;
-    //                 let value = self.vm.memory.get_word(symbol)?;
-    //                 self.vm.memory.push(self.stack, value)?;
-    //             }
-    //             Code::SET_WORD => {
-    //                 let symbol = reader.read_u32()?;
-    //                 let value = self.vm.memory.peek(self.stack)?.copied();
-    //                 let value = value.ok_or(MemoryError::StackUnderflow)?;
-    //                 self.vm.memory.set_word(symbol, value)?;
-    //             }
-    //             Code::LEAVE => {
-    //                 let drop = reader.read_u8()? as Word;
-    //                 let value = self.vm.memory.pop(self.stack)?;
-    //                 self.vm.memory.drop(self.stack, drop)?;
-    //                 self.vm.memory.push(self.stack, value)?;
-    //             }
-    //             _ => {
-    //                 return Err(VmError::InvalidCode);
-    //             }
-    //         }
-    //     }
-    //     self.vm.memory.pop(self.stack).map_err(Into::into)
-    // }
+        while let Some(op) = ip.read_code(&self.vm.memory) {
+            match op {
+                Code::CONST => {
+                    let kind = ip.read_u8(&self.vm.memory)? as Word;
+                    self.vm
+                        .memory
+                        .push(self.stack, Value::new(kind, ip.read_u32(&self.vm.memory)?))?
+                }
+                Code::WORD => {
+                    let symbol = ip.read_u32(&self.vm.memory)?;
+                    let value = self.vm.memory.get_word(symbol)?;
+                    self.vm.memory.push(self.stack, value)?;
+                }
+                Code::SET_WORD => {
+                    let symbol = ip.read_u32(&self.vm.memory)?;
+                    let value = self.vm.memory.peek(self.stack)?.copied();
+                    let value = value.ok_or(MemoryError::StackUnderflow)?;
+                    self.vm.memory.set_word(symbol, value)?;
+                }
+                Code::LEAVE => {
+                    let drop = ip.read_u8(&self.vm.memory)? as Word;
+                    let value = self.vm.memory.pop(self.stack)?;
+                    self.vm.memory.drop(self.stack, drop)?;
+                    self.vm.memory.push(self.stack, value)?;
+                    break;
+                }
+                _ => {
+                    return Err(VmError::InvalidCode);
+                }
+            }
+        }
+        self.vm.memory.pop(self.stack).map_err(Into::into)
+    }
 }
 
 impl Collector for Process<'_> {
@@ -771,31 +756,31 @@ mod tests {
         Ok(())
     }
 
-    // #[test]
-    // fn test_exec_1() -> Result<(), VmError> {
-    //     let mut vm = create_test_vm()?;
-    //     let mut process = Process::new(&mut vm)?;
+    #[test]
+    fn test_exec_1() -> Result<(), VmError> {
+        let mut vm = create_test_vm()?;
+        let mut process = Process::new(&mut vm)?;
 
-    //     let block = process.parse_block("1 2 3")?;
-    //     let code_block = process.compile(block.as_block()?)?;
+        let block = process.parse_block("1 2 3")?;
+        let code_block = process.compile(block.as_block()?)?;
 
-    //     let result = process.exec(code_block)?;
-    //     assert_eq!(result, Value::int(3), "Expected result to be 3");
+        let result = process.exec(code_block)?;
+        assert_eq!(result, Value::int(3), "Expected result to be 3");
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 
-    // #[test]
-    // fn test_exec_2() -> Result<(), VmError> {
-    //     let mut vm = create_test_vm()?;
-    //     let mut process = Process::new(&mut vm)?;
+    #[test]
+    fn test_exec_2() -> Result<(), VmError> {
+        let mut vm = create_test_vm()?;
+        let mut process = Process::new(&mut vm)?;
 
-    //     let block = process.parse_block("x: y: 42 z: 5 y")?;
-    //     let code_block = process.compile(block.as_block()?)?;
+        let block = process.parse_block("x: y: 42 z: 5 y")?;
+        let code_block = process.compile(block.as_block()?)?;
 
-    //     let result = process.exec(code_block)?;
-    //     assert_eq!(result, Value::int(42), "Expected result to be 3");
+        let result = process.exec(code_block)?;
+        assert_eq!(result, Value::int(42), "Expected result to be 3");
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 }

@@ -460,6 +460,16 @@ impl Memory {
         try_from_bytes_mut(bytes).map_err(podcast_error)
     }
 
+    pub fn get_u8(&self, address: usize) -> Option<u8> {
+        self.memory.get(address).copied()
+    }
+
+    pub fn get_u32_ne(&self, address: usize) -> Option<Word> {
+        let bytes = self.memory.get(address..address + 4)?;
+        let word = u32::from_ne_bytes(bytes.try_into().ok()?);
+        Some(word)
+    }
+
     pub fn len<I>(&self, series: Series<I>) -> Result<Offset, MemoryError> {
         self.get::<Offset>(series.address + 4).copied()
     }
