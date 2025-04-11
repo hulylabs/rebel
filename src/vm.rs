@@ -171,13 +171,26 @@ impl<'a> Process<'a> {
         let mut kind = Value::NONE;
 
         while ip < end {
-            let code = self.memory.get::<Code>(ip)?;
+            let code = *self.memory.get::<Code>(ip)?;
             match code {
-                Code(Code::TYPE, typ) => kind = *typ,
+                Code(Code::TYPE, typ) => kind = typ,
                 Code(Code::CONST, value) => {
-                    self.memory.push(self.stack, Value::new(kind, *value))?
+                    self.memory.push(self.stack, Value::new(kind, value))?
                 }
-                Code(Code::LEAVE, stack) => {}
+                Code(Code::WORD, symbol) => {
+                    let value = self.memory.get_word(symbol)?;
+                    self.memory.push(self.stack, value)?;
+                }
+                Code(Code::SET_WORD, symbol) => {
+                    let value = self.memory.peek(self.stack)?.copied();
+                    let value = value.ok_or(MemoryError::StackUnderflow)?;
+                    self.memory.set_word(symbol, value)?;
+                }
+                Code(Code::LEAVE, drop) => {
+                    let value = self.memory.pop(self.stack)?;
+                    self.memory.drop(self.stack, drop)?;
+                    self.memory.push(self.stack, value)?;
+                }
                 _ => {
                     return Err(VmError::InvalidCode);
                 }

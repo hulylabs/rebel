@@ -24,6 +24,8 @@ pub enum MemoryError {
     TypeMismatch,
     #[error("Out of memory")]
     OutOfMemory,
+    #[error("Word not found")]
+    WordNotFound,
 }
 
 pub type Word = u32;
@@ -274,10 +276,24 @@ impl Value {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct KeyValue {
+    key: Address,
+    value: Value,
+}
+
+impl KeyValue {
+    const SIZE_IN_WORDS: Offset = (std::mem::size_of::<KeyValue>() / SIZE_OF_WORD) as Offset;
+}
+
+//
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct MemHeader {
     dead_beef: Word,
     heap_top: Address,
     symbol_table: Address,
+    system_words: Address,
 }
 
 pub struct Memory {
@@ -300,6 +316,10 @@ impl Memory {
         let symbol_table = memory.alloc::<Address>(1024)?.address;
         let header = memory.get_mut::<MemHeader>(0)?;
         header.symbol_table = symbol_table;
+
+        let system_words = memory.alloc::<KeyValue>(1024)?.address;
+        let header = memory.get_mut::<MemHeader>(0)?;
+        header.system_words = system_words;
 
         Ok(memory)
     }
@@ -612,13 +632,25 @@ impl Memory {
         Ok(Series::new(to_address))
     }
 
+    pub fn drop<I>(&mut self, series: Series<I>, items: Offset) -> Result<(), MemoryError> {
+        let block = self.get_mut::<Block>(series.address)?;
+        let new_len = block
+            .len
+            .checked_sub(items)
+            .ok_or(MemoryError::StackUnderflow)?;
+        block.len = new_len;
+        Ok(())
+    }
+
     pub fn get_or_add_symbol(&mut self, symbol: &str) -> Result<Series<u8>, MemoryError> {
         let header = self.get_mut::<MemHeader>(0)?;
         let symbol_table = header.symbol_table;
 
         let block = self.get::<Block>(symbol_table)?;
         let cap = block.cap - Block::SIZE_IN_WORDS;
-        let len = block.len;
+        if cap == 0 {
+            return Err(MemoryError::OutOfMemory);
+        }
 
         let hash_code = {
             let mut hasher = DefaultHasher::new();
@@ -636,7 +668,7 @@ impl Memory {
                 *item = string.address();
 
                 let block = self.get_mut::<Block>(symbol_table)?;
-                block.len = len + 1;
+                block.len += 1;
 
                 return Ok(string);
             } else {
@@ -644,6 +676,77 @@ impl Memory {
                 if string == symbol {
                     return Ok(Series::new(*item));
                 }
+                idx += 1;
+                if idx >= cap {
+                    idx = 0;
+                }
+                if idx == start {
+                    return Err(MemoryError::OutOfMemory);
+                }
+            }
+        }
+    }
+
+    const PHI: u32 = 0x9e3779b9;
+
+    pub fn get_word(&self, symbol: Address) -> Result<Value, MemoryError> {
+        let header = self.get::<MemHeader>(0)?;
+        let system_words = header.system_words;
+
+        let block = self.get::<Block>(system_words)?;
+        let cap = block.cap - Block::SIZE_IN_WORDS;
+        if cap == 0 {
+            return Err(MemoryError::WordNotFound);
+        }
+
+        let hash_code = symbol.wrapping_mul(Self::PHI);
+        let start = hash_code % cap;
+        let mut idx = start;
+        loop {
+            let offset = system_words + Block::SIZE_IN_WORDS + idx * KeyValue::SIZE_IN_WORDS;
+            let item = self.get::<KeyValue>(offset)?;
+            if item.key == symbol {
+                return Ok(item.value);
+            } else if item.key == 0 {
+                return Err(MemoryError::WordNotFound);
+            } else {
+                idx += 1;
+                if idx >= cap {
+                    idx = 0;
+                }
+                if idx == start {
+                    return Err(MemoryError::WordNotFound);
+                }
+            }
+        }
+    }
+
+    pub fn set_word(&mut self, symbol: Address, value: Value) -> Result<(), MemoryError> {
+        let header = self.get_mut::<MemHeader>(0)?;
+        let system_words = header.system_words;
+
+        let block = self.get::<Block>(system_words)?;
+        let cap = block.cap - Block::SIZE_IN_WORDS;
+        if cap == 0 {
+            return Err(MemoryError::OutOfMemory);
+        }
+
+        let hash_code = symbol.wrapping_mul(Self::PHI);
+        let start = hash_code % cap;
+        let mut idx = start;
+        loop {
+            let offset = system_words + Block::SIZE_IN_WORDS + idx * KeyValue::SIZE_IN_WORDS;
+            let item = self.get_mut::<KeyValue>(offset)?;
+            if item.key == symbol {
+                item.value = value;
+                return Ok(());
+            } else if item.key == 0 {
+                item.key = symbol;
+                item.value = value;
+                let block = self.get_mut::<Block>(system_words)?;
+                block.len += 1;
+                return Ok(());
+            } else {
                 idx += 1;
                 if idx >= cap {
                     idx = 0;
