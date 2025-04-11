@@ -124,8 +124,6 @@ impl<T> Series<T> {
     }
 }
 
-pub type String = Series<u8>;
-
 //
 
 #[repr(C)]
@@ -418,8 +416,11 @@ impl Memory {
         try_cast_slice_mut(words_slice).map_err(podcast_error)
     }
 
-    pub fn alloc_string(&mut self, string: &str) -> Result<String, MemoryError> {
-        let bytes = string.as_bytes();
+    pub fn alloc_string(&mut self, string: &str) -> Result<Series<u8>, MemoryError> {
+        self.alloc_bytes(string.as_bytes())
+    }
+
+    pub fn alloc_bytes(&mut self, bytes: &[u8]) -> Result<Series<u8>, MemoryError> {
         let size = bytes.len();
 
         let size_in_words = size.div_ceil(SIZE_OF_WORD);
@@ -430,23 +431,27 @@ impl Memory {
 
         let words_slice = self.get_words_slice_mut(address, 0..size_in_words)?;
         let bytes_slice = cast_slice_mut(words_slice);
-        let iter = bytes_slice.iter_mut().zip(bytes.iter());
-        for (dst, src) in iter {
+        let iter = bytes.iter().zip(bytes_slice.iter_mut());
+        for (src, dst) in iter {
             *dst = *src
         }
 
-        Ok(String::new(address))
+        Ok(Series::new(address))
     }
 
     pub fn get_string(&self, address: Address) -> Result<&str, MemoryError> {
+        let bytes = self.get_bytes(address)?;
+        let string = unsafe { std::str::from_utf8_unchecked(bytes) };
+        Ok(string)
+    }
+
+    pub fn get_bytes(&self, address: Address) -> Result<&[u8], MemoryError> {
         let block = self.get::<Block>(address)?;
         let len = block.len as usize;
         let size_in_words = len.div_ceil(SIZE_OF_WORD);
         let words_slice = self.get_words_slice(address, 0..size_in_words as Offset)?;
         let bytes_slice = try_cast_slice(words_slice).map_err(podcast_error)?;
-        let bytes = &bytes_slice[..len];
-        let string = unsafe { std::str::from_utf8_unchecked(bytes) };
-        Ok(string)
+        Ok(&bytes_slice[..len])
     }
 
     pub fn get<I: AnyBitPattern>(&self, address: Address) -> Result<&I, MemoryError> {
@@ -799,4 +804,32 @@ pub fn capacity_in_items<I>(memory: &Memory, series: Series<I>) -> Result<Offset
 pub fn block_size_in_words<I>(memory: &Memory, series: Series<I>) -> Result<Offset, MemoryError> {
     let block = memory.get::<Block>(series.address)?;
     Ok(block.cap)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bytes_allocation() -> Result<(), MemoryError> {
+        let mut memory = Memory::new(65536)?;
+        let data = b"Hello, world!";
+        let series = memory.alloc_bytes(data)?;
+        let bytes = memory.get_bytes(series.address)?;
+        assert_eq!(bytes, data);
+        Ok(())
+    }
+
+    // #[test]
+    // fn test_memory_push_pop() {
+    //     let mut memory = Memory::new(1024).unwrap();
+    //     let series: Series<i32> = memory.alloc(10).unwrap();
+
+    //     memory.push(series, 42).unwrap();
+    //     assert_eq!(memory.len(series).unwrap(), 1);
+
+    //     let value = memory.pop::<i32>(series).unwrap();
+    //     assert_eq!(value, 42);
+    //     assert_eq!(memory.len(series).unwrap(), 0);
+    // }
 }

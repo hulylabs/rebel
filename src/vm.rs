@@ -1,8 +1,7 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
-use crate::mem::{Block, Memory, MemoryError, Offset, Series, Type, Value, Word};
+use crate::mem::{Address, Memory, MemoryError, Offset, Series, Type, Value, Word};
 use crate::parse::{Collector, Parser, WordKind};
-use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -17,47 +16,34 @@ pub enum VmError {
 
 //
 
-type Op = Word;
+type Op = u8;
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable, PartialEq, Eq)]
-pub struct Code(Op, Word);
+struct Code;
 
 impl Code {
-    const SIZE_IN_WORDS: Offset = 2;
-
     // const HALT: Op = 0;
     const CONST: Op = 1;
-    const TYPE: Op = 2;
+    const NONE: Op = 2;
     const WORD: Op = 3;
     const SET_WORD: Op = 4;
-    // const CALL_NATIVE: Op = 5;
-    const LEAVE: Op = 6;
-
-    pub fn new(op: Op, data: Word) -> Self {
-        Code(op, data)
-    }
-
-    pub fn op(&self) -> Op {
-        self.0
-    }
-
-    pub fn data(&self) -> Word {
-        self.1
-    }
+    const LEAVE: Op = 5;
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+//
+
+enum Call {
+    SetWord(Address),
+}
+
 pub struct Defer {
-    code: Code,
+    call: Call,
     bp: Offset,
     arity: Word,
 }
 
 impl Defer {
-    fn new(code: Code, bp: Offset, arity: Word) -> Self {
-        Defer { code, bp, arity }
+    fn new(call: Call, bp: Offset, arity: Word) -> Self {
+        Defer { call, bp, arity }
     }
 }
 
@@ -86,23 +72,17 @@ pub struct Process<'a> {
     vm: &'a mut Vm,
     stack: Series<Value>,
     pos_stack: Series<Offset>,
-    defer_stack: Series<Defer>,
-    code_stack: Series<Code>,
 }
 
 impl<'a> Process<'a> {
     pub fn new(vm: &'a mut Vm) -> Result<Self, MemoryError> {
         let stack = vm.memory.alloc::<Value>(64)?;
         let pos_stack = vm.memory.alloc::<Offset>(64)?;
-        let defer_stack = vm.memory.alloc::<Defer>(64)?;
-        let code_stack = vm.memory.alloc::<Code>(64)?;
 
         Ok(Self {
             vm,
             stack,
             pos_stack,
-            defer_stack,
-            code_stack,
         })
     }
 
@@ -135,18 +115,26 @@ impl<'a> Process<'a> {
             .push(self.stack, Value::new(kind, block.address()))
     }
 
-    pub fn compile(&mut self, block: Series<Value>) -> Result<Series<Code>, MemoryError> {
+    pub fn compile(&mut self, block: Series<Value>) -> Result<Series<u8>, MemoryError> {
+        let mut defer_stack = Vec::<Defer>::new();
+        let mut code_stack = Vec::<u8>::new();
+
         let mut ip = block.address() + Value::SIZE_IN_WORDS;
         let end = ip + self.vm.memory.len(block)? * Value::SIZE_IN_WORDS;
         let mut stack_len = 0;
 
         while ip < end {
-            while let Some(defer) = self.vm.memory.peek(self.defer_stack)? {
+            while let Some(defer) = defer_stack.last() {
                 if stack_len == defer.bp + defer.arity {
                     stack_len -= defer.arity;
                     stack_len += 1;
-                    self.vm.memory.push(self.code_stack, defer.code)?;
-                    self.vm.memory.pop(self.defer_stack)?;
+                    match defer.call {
+                        Call::SetWord(symbol) => {
+                            code_stack.push(Code::SET_WORD);
+                            code_stack.extend(u32::to_ne_bytes(symbol));
+                        }
+                    }
+                    defer_stack.pop();
                 } else {
                     break;
                 }
@@ -155,23 +143,17 @@ impl<'a> Process<'a> {
             let value = self.vm.memory.get::<Value>(ip)?;
             match value.kind() {
                 Value::WORD => {
-                    let code = Code::new(Code::WORD, value.data());
-                    self.vm.memory.push(self.code_stack, code)?;
+                    code_stack.push(Code::WORD);
+                    code_stack.extend(u32::to_ne_bytes(value.data()));
                     stack_len += 1;
                 }
                 Value::SET_WORD => {
-                    let code = Code::new(Code::SET_WORD, value.data());
-                    let defer = Defer::new(code, stack_len, 1);
-                    self.vm.memory.push(self.defer_stack, defer)?;
+                    let defer = Defer::new(Call::SetWord(value.data()), stack_len, 1);
+                    defer_stack.push(defer);
                 }
                 _ => {
-                    self.vm.memory.push_n(
-                        self.code_stack,
-                        &[
-                            Code::new(Code::TYPE, value.kind()),
-                            Code::new(Code::CONST, value.data()),
-                        ],
-                    )?;
+                    code_stack.extend([Code::CONST, value.kind() as u8].iter());
+                    code_stack.extend(u32::to_ne_bytes(value.data()));
                     stack_len += 1;
                 }
             }
@@ -179,60 +161,49 @@ impl<'a> Process<'a> {
         }
         // fix stack
         match stack_len {
-            0 => {
-                self.vm.memory.push_n(
-                    self.code_stack,
-                    &[
-                        Code::new(Code::TYPE, Value::NONE),
-                        Code::new(Code::CONST, 0),
-                    ],
-                )?;
-            }
+            0 => code_stack.push(Code::NONE),
             1 => {}
-            n => {
-                self.vm
-                    .memory
-                    .push(self.code_stack, Code::new(Code::LEAVE, n - 1))?;
-            }
+            n => code_stack.extend([Code::LEAVE, (n - 1) as u8].iter()),
         }
-        Ok(self.vm.memory.drain(self.code_stack, 0)?)
+
+        self.vm.memory.alloc_bytes(&code_stack)
     }
 
-    pub fn exec(&mut self, code: Series<Code>) -> Result<Value, VmError> {
-        let mut ip = code.address() + Block::SIZE_IN_WORDS;
-        let end = ip + self.vm.memory.len(code)? * Code::SIZE_IN_WORDS;
+    // pub fn exec(&mut self, code: Series<Code>) -> Result<Value, VmError> {
+    //     let mut ip = code.address() + Block::SIZE_IN_WORDS;
+    //     let end = ip + self.vm.memory.len(code)? * Code::SIZE_IN_WORDS;
 
-        let mut kind = Value::NONE;
+    //     let mut kind = Value::NONE;
 
-        while ip < end {
-            let code = *self.vm.memory.get::<Code>(ip)?;
-            match code {
-                Code(Code::TYPE, typ) => kind = typ,
-                Code(Code::CONST, value) => {
-                    self.vm.memory.push(self.stack, Value::new(kind, value))?
-                }
-                Code(Code::WORD, symbol) => {
-                    let value = self.vm.memory.get_word(symbol)?;
-                    self.vm.memory.push(self.stack, value)?;
-                }
-                Code(Code::SET_WORD, symbol) => {
-                    let value = self.vm.memory.peek(self.stack)?.copied();
-                    let value = value.ok_or(MemoryError::StackUnderflow)?;
-                    self.vm.memory.set_word(symbol, value)?;
-                }
-                Code(Code::LEAVE, drop) => {
-                    let value = self.vm.memory.pop(self.stack)?;
-                    self.vm.memory.drop(self.stack, drop)?;
-                    self.vm.memory.push(self.stack, value)?;
-                }
-                _ => {
-                    return Err(VmError::InvalidCode);
-                }
-            }
-            ip += Code::SIZE_IN_WORDS;
-        }
-        self.vm.memory.pop(self.stack).map_err(Into::into)
-    }
+    //     while ip < end {
+    //         let code = *self.vm.memory.get::<Code>(ip)?;
+    //         match code {
+    //             Code(Code::TYPE, typ) => kind = typ,
+    //             Code(Code::CONST, value) => {
+    //                 self.vm.memory.push(self.stack, Value::new(kind, value))?
+    //             }
+    //             Code(Code::WORD, symbol) => {
+    //                 let value = self.vm.memory.get_word(symbol)?;
+    //                 self.vm.memory.push(self.stack, value)?;
+    //             }
+    //             Code(Code::SET_WORD, symbol) => {
+    //                 let value = self.vm.memory.peek(self.stack)?.copied();
+    //                 let value = value.ok_or(MemoryError::StackUnderflow)?;
+    //                 self.vm.memory.set_word(symbol, value)?;
+    //             }
+    //             Code(Code::LEAVE, drop) => {
+    //                 let value = self.vm.memory.pop(self.stack)?;
+    //                 self.vm.memory.drop(self.stack, drop)?;
+    //                 self.vm.memory.push(self.stack, value)?;
+    //             }
+    //             _ => {
+    //                 return Err(VmError::InvalidCode);
+    //             }
+    //         }
+    //         ip += Code::SIZE_IN_WORDS;
+    //     }
+    //     self.vm.memory.pop(self.stack).map_err(Into::into)
+    // }
 }
 
 impl Collector for Process<'_> {
@@ -288,6 +259,8 @@ impl Collector for Process<'_> {
 mod tests {
     use super::*;
     use crate::mem::{MemoryError, Value};
+
+    const TYPE_INT: u8 = Value::INT as u8;
 
     // Helper function to create a test memory
     fn create_test_vm() -> Result<Vm, MemoryError> {
@@ -533,19 +506,30 @@ mod tests {
 
         let block = process.parse_block("1 2 3")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.peek_at(code_block, 0)?;
-
-        assert_eq!(code.len(), 7, "Should generate 7 instructions");
+        let code = vm.memory.get_bytes(code_block.address())?;
 
         match code {
             [
-                Code(Code::TYPE, Value::INT),
-                Code(Code::CONST, 1),
-                Code(Code::TYPE, Value::INT),
-                Code(Code::CONST, 2),
-                Code(Code::TYPE, Value::INT),
-                Code(Code::CONST, 3),
-                Code(Code::LEAVE, 2),
+                Code::CONST,
+                TYPE_INT,
+                1,
+                0,
+                0,
+                0,
+                Code::CONST,
+                TYPE_INT,
+                2,
+                0,
+                0,
+                0,
+                Code::CONST,
+                TYPE_INT,
+                3,
+                0,
+                0,
+                0,
+                Code::LEAVE,
+                2,
             ] => {}
             _ => panic!("Unexpected code sequence: {:?}", code),
         }
@@ -561,17 +545,34 @@ mod tests {
 
         let block = process.parse_block("x: 5 x")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.peek_at(code_block, 0)?;
+        let code = vm.memory.get_bytes(code_block.address())?;
 
         match code {
             [
-                Code(Code::TYPE, Value::INT),
-                Code(Code::CONST, 5),
-                Code(Code::SET_WORD, x),
-                Code(Code::WORD, y),
-                Code(Code::LEAVE, 1),
+                Code::CONST,
+                TYPE_INT,
+                5,
+                0,
+                0,
+                0,
+                Code::SET_WORD,
+                x1,
+                x2,
+                x3,
+                x4,
+                Code::WORD,
+                y1,
+                y2,
+                y3,
+                y4,
+                Code::LEAVE,
+                1,
             ] => {
-                assert_eq!(x, y, "x should be same symbol")
+                assert_eq!(
+                    [x1, x2, x3, x4],
+                    [y1, y2, y3, y4],
+                    "x should be same symbol"
+                )
             }
             _ => panic!("Unexpected code sequence: {:?}", code),
         }
@@ -587,18 +588,44 @@ mod tests {
 
         let block = process.parse_block("x: y: z: 42 y")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.peek_at(code_block, 0)?;
+        let code = vm.memory.get_bytes(code_block.address())?;
 
         match code {
             [
-                Code(Code::TYPE, Value::INT),
-                Code(Code::CONST, 42),
-                Code(Code::SET_WORD, x),
-                Code(Code::SET_WORD, y),
-                Code(Code::SET_WORD, z),
-                Code(Code::WORD, m),
-                Code(Code::LEAVE, 1),
+                Code::CONST,
+                TYPE_INT,
+                42,
+                0,
+                0,
+                0,
+                Code::SET_WORD,
+                x1,
+                x2,
+                x3,
+                x4,
+                Code::SET_WORD,
+                y1,
+                y2,
+                y3,
+                y4,
+                Code::SET_WORD,
+                z1,
+                z2,
+                z3,
+                z4,
+                Code::WORD,
+                m1,
+                m2,
+                m3,
+                m4,
+                Code::LEAVE,
+                1,
             ] => {
+                let x = [x1, x2, x3, x4];
+                let y = [y1, y2, y3, y4];
+                let z = [z1, z2, z3, z4];
+                let m = [m1, m2, m3, m4];
+
                 assert_eq!(m, y, "y should be same symbol");
                 assert_ne!(x, y, "x should be different from y");
                 assert_ne!(x, z, "x should be different from z");
@@ -618,43 +645,41 @@ mod tests {
 
         let block = process.parse_block("")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.peek_at(code_block, 0)?;
-
-        assert_eq!(code.len(), 2, "Empty block should have 2 instructions");
+        let code = vm.memory.get_bytes(code_block.address())?;
 
         match code {
-            [Code(Code::TYPE, Value::NONE), Code(Code::CONST, 0)] => {}
+            [Code::NONE] => {}
             _ => panic!("Unexpected code sequence: {:?}", code),
         }
 
         Ok(())
     }
 
-    #[test]
-    fn test_exec_1() -> Result<(), VmError> {
-        let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+    // #[test]
+    // fn test_exec_1() -> Result<(), VmError> {
+    //     let mut vm = create_test_vm()?;
+    //     let mut process = Process::new(&mut vm)?;
 
-        let block = process.parse_block("1 2 3")?;
-        let code_block = process.compile(block.as_block()?)?;
+    //     let block = process.parse_block("1 2 3")?;
+    //     let code_block = process.compile(block.as_block()?)?;
 
-        let result = process.exec(code_block)?;
-        assert_eq!(result, Value::int(3), "Expected result to be 3");
+    //     let result = process.exec(code_block)?;
+    //     assert_eq!(result, Value::int(3), "Expected result to be 3");
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 
-    #[test]
-    fn test_exec_2() -> Result<(), VmError> {
-        let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+    // #[test]
+    // fn test_exec_2() -> Result<(), VmError> {
+    //     let mut vm = create_test_vm()?;
+    //     let mut process = Process::new(&mut vm)?;
 
-        let block = process.parse_block("x: y: 42 z: 5 y")?;
-        let code_block = process.compile(block.as_block()?)?;
+    //     let block = process.parse_block("x: y: 42 z: 5 y")?;
+    //     let code_block = process.compile(block.as_block()?)?;
 
-        let result = process.exec(code_block)?;
-        assert_eq!(result, Value::int(42), "Expected result to be 3");
+    //     let result = process.exec(code_block)?;
+    //     assert_eq!(result, Value::int(42), "Expected result to be 3");
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }
