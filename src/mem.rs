@@ -654,10 +654,16 @@ impl Memory {
         } else {
             let items_slice = self.get_items_slice_mut::<I>(series.address, 0..len)?;
             let last_index = (len - 1) as usize;
-            let last = items_slice[last_index];
+            let last = items_slice
+                .get(last_index)
+                .copied()
+                .ok_or(MemoryError::StackUnderflow)?;
             let new_last = len.checked_sub(items).ok_or(MemoryError::StackUnderflow)?;
             let new_last = new_last as usize;
-            items_slice[new_last] = last;
+            let new_last_item = items_slice
+                .get_mut(new_last)
+                .ok_or(MemoryError::StackUnderflow)?;
+            *new_last_item = last;
 
             let block = self.get_mut::<Block>(series.address)?;
             block.len = (new_last + 1) as Offset;
