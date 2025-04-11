@@ -1,13 +1,13 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
 use crate::mem::{Address, Block, Memory, MemoryError, Offset, Series, Type, Value, Word};
-use crate::parse::{Collector, Parser, WordKind};
+use crate::parse::{Collector, Parser, ParserError, WordKind};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum VmError {
     #[error(transparent)]
-    ParserError(#[from] crate::parse::ParserError<MemoryError>),
+    ParserError(#[from] ParserError<MemoryError>),
     #[error(transparent)]
     MemoryError(#[from] MemoryError),
     #[error("Invalid code")]

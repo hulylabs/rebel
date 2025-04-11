@@ -521,35 +521,35 @@ impl Memory {
         }
     }
 
-    pub fn push_n<const N: usize, I: AnyBitPattern + NoUninit>(
-        &mut self,
-        series: Series<I>,
-        values: &[I; N],
-    ) -> Result<(), MemoryError> {
-        let block = self.get_mut::<Block>(series.address)?;
-        let cap = block.cap;
-        let len = block.len;
+    // pub fn push_n<const N: usize, I: AnyBitPattern + NoUninit>(
+    //     &mut self,
+    //     series: Series<I>,
+    //     values: &[I; N],
+    // ) -> Result<(), MemoryError> {
+    //     let block = self.get_mut::<Block>(series.address)?;
+    //     let cap = block.cap;
+    //     let len = block.len;
 
-        let item_size = std::mem::size_of::<I>() as Offset;
-        let cap_items = (cap - Block::SIZE) / item_size;
-        let items_len = N as Offset;
-        let new_len = len + items_len;
+    //     let item_size = std::mem::size_of::<I>() as Offset;
+    //     let cap_items = (cap - Block::SIZE) / item_size;
+    //     let items_len = N as Offset;
+    //     let new_len = len + items_len;
 
-        if new_len > cap_items {
-            Err(MemoryError::StackOverflow)
-        } else {
-            block.len = new_len;
-            let items = self.get_items_slice_mut(series.address, len..new_len)?;
-            if items.len() != N {
-                return Err(MemoryError::OutOfBounds);
-            }
-            // for i in 0..N {
-            //     items[i] = values[i];
-            // }
-            items[..N].copy_from_slice(&values[..N]);
-            Ok(())
-        }
-    }
+    //     if new_len > cap_items {
+    //         Err(MemoryError::StackOverflow)
+    //     } else {
+    //         block.len = new_len;
+    //         let items = self.get_items_slice_mut(series.address, len..new_len)?;
+    //         if items.len() != N {
+    //             return Err(MemoryError::OutOfBounds);
+    //         }
+    //         // for i in 0..N {
+    //         //     items[i] = values[i];
+    //         // }
+    //         items[..N].copy_from_slice(&values[..N]);
+    //         Ok(())
+    //     }
+    // }
 
     pub fn pop<I: AnyBitPattern>(&mut self, series: Series<I>) -> Result<I, MemoryError> {
         let item_size = std::mem::size_of::<I>() as Offset;
