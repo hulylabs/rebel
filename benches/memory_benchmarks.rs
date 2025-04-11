@@ -29,7 +29,7 @@ fn bench_realistic_memory_operations(c: &mut Criterion) {
         b.iter_with_setup(
             || {
                 // Create a new memory arena for each iteration
-                Memory::new(1024 * 1024)
+                Memory::new(1024 * 1024).unwrap()
             },
             |mut memory| {
                 // Allocate a series for a list of integers
@@ -72,7 +72,7 @@ fn bench_realistic_memory_operations(c: &mut Criterion) {
         b.iter_with_setup(
             || {
                 // Create a new memory arena for each iteration
-                Memory::new(1024 * 1024)
+                Memory::new(1024 * 1024).unwrap()
             },
             |mut memory| {
                 // Create nested lists - a main list with 5 sublists
@@ -124,7 +124,7 @@ fn bench_realistic_memory_operations(c: &mut Criterion) {
         b.iter_with_setup(
             || {
                 // Create a new memory arena for each iteration
-                let mut memory = Memory::new(1024 * 1024);
+                let mut memory = Memory::new(1024 * 1024).unwrap();
                 // Create a stack for operations
                 let stack = memory.alloc::<Value>(100).unwrap();
 
