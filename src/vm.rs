@@ -2,7 +2,6 @@
 
 use crate::mem::{Address, Memory, MemoryError, Offset, Series, Type, Value, Word};
 use crate::parse::{Collector, Parser, WordKind};
-use arrayvec::{ArrayVec, CapacityError};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -32,10 +31,12 @@ impl Code {
 
 //
 
+#[derive(Debug, Clone, Copy)]
 enum Call {
     SetWord(Address),
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Defer {
     call: Call,
     bp: Offset,
@@ -45,6 +46,16 @@ pub struct Defer {
 impl Defer {
     fn new(call: Call, bp: Offset, arity: Word) -> Self {
         Defer { call, bp, arity }
+    }
+}
+
+impl Default for Defer {
+    fn default() -> Self {
+        Defer {
+            call: Call::SetWord(0),
+            bp: 0,
+            arity: 0,
+        }
     }
 }
 
@@ -69,9 +80,61 @@ impl Vm {
 
 //
 
-fn err_memory_overflow<T>(_: CapacityError<T>) -> MemoryError {
-    MemoryError::StackOverflow
+struct ArrayStack<T, const N: usize> {
+    data: [T; N],
+    len: usize,
 }
+
+impl<T, const N: usize> ArrayStack<T, N>
+where
+    T: Copy + Default,
+{
+    fn new() -> Self {
+        Self {
+            data: [T::default(); N],
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, value: T) -> Result<(), MemoryError> {
+        self.data
+            .get_mut(self.len)
+            .map(|slot| {
+                *slot = value;
+                self.len += 1;
+            })
+            .ok_or(MemoryError::StackOverflow)
+    }
+
+    fn extend<const L: usize>(&mut self, values: &[T; L]) -> Result<(), MemoryError> {
+        self.data
+            .get_mut(self.len..self.len + L)
+            .map(|slice| {
+                slice.copy_from_slice(values);
+                self.len += L;
+            })
+            .ok_or(MemoryError::StackOverflow)
+    }
+
+    fn drop(&mut self) -> Result<(), MemoryError> {
+        if self.len > 0 {
+            self.len -= 1;
+            Ok(())
+        } else {
+            Err(MemoryError::StackUnderflow)
+        }
+    }
+
+    fn last(&self) -> Option<&T> {
+        self.len.checked_sub(1).and_then(|i| self.data.get(i))
+    }
+
+    fn as_slice(&self) -> Result<&[T], MemoryError> {
+        self.data.get(..self.len).ok_or(MemoryError::OutOfBounds)
+    }
+}
+
+//
 
 pub struct Process<'a> {
     vm: &'a mut Vm,
@@ -121,8 +184,8 @@ impl<'a> Process<'a> {
     }
 
     pub fn compile(&mut self, block: Series<Value>) -> Result<Series<u8>, MemoryError> {
-        let mut defer_stack = ArrayVec::<Defer, 64>::new();
-        let mut code_stack = ArrayVec::<u8, 512>::new();
+        let mut defer_stack = ArrayStack::<Defer, 64>::new();
+        let mut code_stack = ArrayStack::<u8, 512>::new();
 
         let mut ip = block.address() + Value::SIZE_IN_WORDS;
         let end = ip + self.vm.memory.len(block)? * Value::SIZE_IN_WORDS;
@@ -135,15 +198,11 @@ impl<'a> Process<'a> {
                     stack_len += 1;
                     match defer.call {
                         Call::SetWord(symbol) => {
-                            code_stack
-                                .try_push(Code::SET_WORD)
-                                .map_err(err_memory_overflow)?;
-                            code_stack
-                                .try_extend_from_slice(&u32::to_ne_bytes(symbol))
-                                .map_err(err_memory_overflow)?;
+                            code_stack.push(Code::SET_WORD)?;
+                            code_stack.extend(&u32::to_ne_bytes(symbol))?;
                         }
                     }
-                    defer_stack.pop();
+                    defer_stack.drop()?;
                 } else {
                     break;
                 }
@@ -152,25 +211,17 @@ impl<'a> Process<'a> {
             let value = self.vm.memory.get::<Value>(ip)?;
             match value.kind() {
                 Value::WORD => {
-                    code_stack
-                        .try_push(Code::WORD)
-                        .map_err(err_memory_overflow)?;
-                    code_stack
-                        .try_extend_from_slice(&u32::to_ne_bytes(value.data()))
-                        .map_err(err_memory_overflow)?;
+                    code_stack.push(Code::WORD)?;
+                    code_stack.extend(&u32::to_ne_bytes(value.data()))?;
                     stack_len += 1;
                 }
                 Value::SET_WORD => {
                     let defer = Defer::new(Call::SetWord(value.data()), stack_len, 1);
-                    defer_stack.try_push(defer).map_err(err_memory_overflow)?;
+                    defer_stack.push(defer)?;
                 }
                 _ => {
-                    code_stack
-                        .try_extend_from_slice(&[Code::CONST, value.kind() as u8])
-                        .map_err(err_memory_overflow)?;
-                    code_stack
-                        .try_extend_from_slice(&u32::to_ne_bytes(value.data()))
-                        .map_err(err_memory_overflow)?;
+                    code_stack.extend(&[Code::CONST, value.kind() as u8])?;
+                    code_stack.extend(&u32::to_ne_bytes(value.data()))?;
                     stack_len += 1;
                 }
             }
@@ -178,16 +229,12 @@ impl<'a> Process<'a> {
         }
         // fix stack
         match stack_len {
-            0 => code_stack
-                .try_push(Code::NONE)
-                .map_err(err_memory_overflow)?,
+            0 => code_stack.push(Code::NONE)?,
             1 => {}
-            n => code_stack
-                .try_extend_from_slice(&[Code::LEAVE, (n - 1) as u8])
-                .map_err(err_memory_overflow)?,
+            n => code_stack.extend(&[Code::LEAVE, (n - 1) as u8])?,
         }
 
-        self.vm.memory.alloc_bytes(&code_stack)
+        self.vm.memory.alloc_bytes(code_stack.as_slice()?)
     }
 
     // pub fn exec(&mut self, code: Series<Code>) -> Result<Value, VmError> {
