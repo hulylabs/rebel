@@ -2,6 +2,7 @@
 
 use crate::mem::{Address, Memory, MemoryError, Offset, Series, Type, Value, Word};
 use crate::parse::{Collector, Parser, WordKind};
+use arrayvec::{ArrayVec, CapacityError};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -68,6 +69,10 @@ impl Vm {
 
 //
 
+fn err_memory_overflow<T>(_: CapacityError<T>) -> MemoryError {
+    MemoryError::StackOverflow
+}
+
 pub struct Process<'a> {
     vm: &'a mut Vm,
     stack: Series<Value>,
@@ -116,8 +121,8 @@ impl<'a> Process<'a> {
     }
 
     pub fn compile(&mut self, block: Series<Value>) -> Result<Series<u8>, MemoryError> {
-        let mut defer_stack = Vec::<Defer>::new();
-        let mut code_stack = Vec::<u8>::new();
+        let mut defer_stack = ArrayVec::<Defer, 64>::new();
+        let mut code_stack = ArrayVec::<u8, 512>::new();
 
         let mut ip = block.address() + Value::SIZE_IN_WORDS;
         let end = ip + self.vm.memory.len(block)? * Value::SIZE_IN_WORDS;
@@ -130,8 +135,12 @@ impl<'a> Process<'a> {
                     stack_len += 1;
                     match defer.call {
                         Call::SetWord(symbol) => {
-                            code_stack.push(Code::SET_WORD);
-                            code_stack.extend(u32::to_ne_bytes(symbol));
+                            code_stack
+                                .try_push(Code::SET_WORD)
+                                .map_err(err_memory_overflow)?;
+                            code_stack
+                                .try_extend_from_slice(&u32::to_ne_bytes(symbol))
+                                .map_err(err_memory_overflow)?;
                         }
                     }
                     defer_stack.pop();
@@ -143,17 +152,25 @@ impl<'a> Process<'a> {
             let value = self.vm.memory.get::<Value>(ip)?;
             match value.kind() {
                 Value::WORD => {
-                    code_stack.push(Code::WORD);
-                    code_stack.extend(u32::to_ne_bytes(value.data()));
+                    code_stack
+                        .try_push(Code::WORD)
+                        .map_err(err_memory_overflow)?;
+                    code_stack
+                        .try_extend_from_slice(&u32::to_ne_bytes(value.data()))
+                        .map_err(err_memory_overflow)?;
                     stack_len += 1;
                 }
                 Value::SET_WORD => {
                     let defer = Defer::new(Call::SetWord(value.data()), stack_len, 1);
-                    defer_stack.push(defer);
+                    defer_stack.try_push(defer).map_err(err_memory_overflow)?;
                 }
                 _ => {
-                    code_stack.extend([Code::CONST, value.kind() as u8].iter());
-                    code_stack.extend(u32::to_ne_bytes(value.data()));
+                    code_stack
+                        .try_extend_from_slice(&[Code::CONST, value.kind() as u8])
+                        .map_err(err_memory_overflow)?;
+                    code_stack
+                        .try_extend_from_slice(&u32::to_ne_bytes(value.data()))
+                        .map_err(err_memory_overflow)?;
                     stack_len += 1;
                 }
             }
@@ -161,9 +178,13 @@ impl<'a> Process<'a> {
         }
         // fix stack
         match stack_len {
-            0 => code_stack.push(Code::NONE),
+            0 => code_stack
+                .try_push(Code::NONE)
+                .map_err(err_memory_overflow)?,
             1 => {}
-            n => code_stack.extend([Code::LEAVE, (n - 1) as u8].iter()),
+            n => code_stack
+                .try_extend_from_slice(&[Code::LEAVE, (n - 1) as u8])
+                .map_err(err_memory_overflow)?,
         }
 
         self.vm.memory.alloc_bytes(&code_stack)
