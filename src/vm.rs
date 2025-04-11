@@ -106,6 +106,16 @@ impl<'a> Process<'a> {
         })
     }
 
+    pub fn add_instrinsic(
+        &mut self,
+        name: &str,
+        instrinsic: InstrinsicFn,
+    ) -> Result<(), MemoryError> {
+        let id = self.vm.instrinsics.len() as Word;
+        self.vm.instrinsics.push(instrinsic);
+        self.vm.memory.set_word_str(name, Value::intrinsic(id))
+    }
+
     pub fn parse_block(&mut self, input: &str) -> Result<Value, VmError> {
         Parser::parse_block(input, self)?;
         self.vm.memory.pop(self.stack).map_err(Into::into)

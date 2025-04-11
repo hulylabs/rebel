@@ -145,6 +145,7 @@ impl Value {
     pub const GET_WORD: Type = 7;
     pub const PATH: Type = 8;
     pub const FLOAT: Type = 9;
+    pub const INTRINSIC: Type = 10;
 
     pub fn new(kind: Type, data: Word) -> Self {
         Self(kind, data)
@@ -185,6 +186,10 @@ impl Value {
 
     pub fn path(value: Series<Value>) -> Self {
         Value(Self::PATH, value.address)
+    }
+
+    pub fn intrinsic(id: Word) -> Self {
+        Value(Self::INTRINSIC, id)
     }
 
     /// Returns true if the value is of the given type
@@ -719,6 +724,11 @@ impl Memory {
                 }
             }
         }
+    }
+
+    pub fn set_word_str(&mut self, symbol: &str, value: Value) -> Result<(), MemoryError> {
+        let symbol = self.get_or_add_symbol(symbol)?;
+        self.set_word(symbol.address, value)
     }
 
     pub fn set_word(&mut self, symbol: Address, value: Value) -> Result<(), MemoryError> {
