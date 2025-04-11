@@ -259,7 +259,7 @@ impl<'a> Process<'a> {
         match stack_len {
             0 => code_stack.push(Code::NONE)?,
             1 => {}
-            n => code_stack.extend(&[Code::LEAVE, (n - 1) as u8])?,
+            n => code_stack.extend(&[Code::LEAVE, n as u8])?,
         }
         // code_stack.push(Code::HALT)?;
 
@@ -293,9 +293,10 @@ impl<'a> Process<'a> {
                 }
                 Code::LEAVE => {
                     let drop = ip.read_u8(&self.vm.memory)? as Word;
-                    let value = self.vm.memory.pop(self.stack)?;
-                    self.vm.memory.drop(self.stack, drop)?;
-                    self.vm.memory.push(self.stack, value)?;
+                    // let value = self.vm.memory.pop(self.stack)?;
+                    // self.vm.memory.drop(self.stack, drop)?;
+                    // self.vm.memory.push(self.stack, value)?;
+                    self.vm.memory.nip(self.stack, drop)?;
                     break;
                 }
                 _ => {
@@ -630,7 +631,7 @@ mod tests {
                 0,
                 0,
                 Code::LEAVE,
-                2,
+                3,
             ] => {}
             _ => panic!("Unexpected code sequence: {:?}", code),
         }
@@ -667,7 +668,7 @@ mod tests {
                 y3,
                 y4,
                 Code::LEAVE,
-                1,
+                2,
             ] => {
                 assert_eq!(
                     [x1, x2, x3, x4],
@@ -720,7 +721,7 @@ mod tests {
                 m3,
                 m4,
                 Code::LEAVE,
-                1,
+                2,
             ] => {
                 let x = [x1, x2, x3, x4];
                 let y = [y1, y2, y3, y4];
@@ -766,6 +767,7 @@ mod tests {
 
         let result = process.exec(code_block)?;
         assert_eq!(result, Value::int(3), "Expected result to be 3");
+        assert_eq!(process.vm.memory.len(process.stack)?, 0);
 
         Ok(())
     }
@@ -780,6 +782,7 @@ mod tests {
 
         let result = process.exec(code_block)?;
         assert_eq!(result, Value::int(42), "Expected result to be 3");
+        assert_eq!(process.vm.memory.len(process.stack)?, 0);
 
         Ok(())
     }

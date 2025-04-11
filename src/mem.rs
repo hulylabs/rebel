@@ -641,6 +641,30 @@ impl Memory {
         Ok(())
     }
 
+    pub fn nip<I: AnyBitPattern + NoUninit>(
+        &mut self,
+        series: Series<I>,
+        items: Offset,
+    ) -> Result<(), MemoryError> {
+        let block = self.get::<Block>(series.address)?;
+        let len = block.len;
+
+        if len == 0 {
+            Err(MemoryError::StackUnderflow)
+        } else {
+            let items_slice = self.get_items_slice_mut::<I>(series.address, 0..len)?;
+            let last_index = (len - 1) as usize;
+            let last = items_slice[last_index];
+            let new_last = len.checked_sub(items).ok_or(MemoryError::StackUnderflow)?;
+            let new_last = new_last as usize;
+            items_slice[new_last] = last;
+
+            let block = self.get_mut::<Block>(series.address)?;
+            block.len = (new_last + 1) as Offset;
+            Ok(())
+        }
+    }
+
     pub fn get_or_add_symbol(&mut self, symbol: &str) -> Result<Series<u8>, MemoryError> {
         let header = self.get_mut::<MemHeader>(0)?;
         let symbol_table = header.symbol_table;
