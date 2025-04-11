@@ -2,8 +2,8 @@
 
 use crate::parse::WordKind;
 use bytemuck::{
-    AnyBitPattern, NoUninit, Pod, PodCastError, Zeroable, cast_slice, cast_slice_mut,
-    try_cast_slice, try_cast_slice_mut, try_from_bytes, try_from_bytes_mut,
+    AnyBitPattern, NoUninit, Pod, PodCastError, Zeroable, try_cast_slice, try_cast_slice_mut,
+    try_from_bytes, try_from_bytes_mut,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
