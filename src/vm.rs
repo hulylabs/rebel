@@ -164,7 +164,7 @@ impl<'a> Process<'a> {
         Ok(self.memory.drain(self.code_stack, 0)?)
     }
 
-    pub fn exec(&mut self, code: Series<Code>) -> Result<(), VmError> {
+    pub fn exec(&mut self, code: Series<Code>) -> Result<Value, VmError> {
         let mut ip = code.address() + Block::SIZE_IN_WORDS;
         let end = ip + self.memory.len(code)? * Code::SIZE_IN_WORDS;
 
@@ -197,7 +197,7 @@ impl<'a> Process<'a> {
             }
             ip += Code::SIZE_IN_WORDS;
         }
-        Ok(())
+        self.memory.pop(self.stack).map_err(Into::into)
     }
 }
 
@@ -597,6 +597,34 @@ mod tests {
             [Code(Code::TYPE, Value::NONE), Code(Code::CONST, 0)] => {}
             _ => panic!("Unexpected code sequence: {:?}", code),
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_exec_1() -> Result<(), VmError> {
+        let mut memory = create_test_memory()?;
+        let mut process = Process::new(&mut memory)?;
+
+        let block = process.parse_block("1 2 3")?;
+        let code_block = process.compile(block.as_block()?)?;
+
+        let result = process.exec(code_block)?;
+        assert_eq!(result, Value::int(3), "Expected result to be 3");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_exec_2() -> Result<(), VmError> {
+        let mut memory = create_test_memory()?;
+        let mut process = Process::new(&mut memory)?;
+
+        let block = process.parse_block("x: y: 42 z: 5 y")?;
+        let code_block = process.compile(block.as_block()?)?;
+
+        let result = process.exec(code_block)?;
+        assert_eq!(result, Value::int(42), "Expected result to be 3");
 
         Ok(())
     }
