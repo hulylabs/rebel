@@ -2,8 +2,8 @@
 
 use crate::parse::WordKind;
 use bytemuck::{
-    AnyBitPattern, NoUninit, Pod, PodCastError, Zeroable, try_cast_slice, try_cast_slice_mut,
-    try_from_bytes, try_from_bytes_mut,
+    AnyBitPattern, NoUninit, Pod, PodCastError, Zeroable, must_cast_slice_mut, try_cast_slice,
+    try_cast_slice_mut, try_from_bytes, try_from_bytes_mut,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -369,7 +369,8 @@ impl Memory {
         let address = self.heap_alloc(size_in_bytes, len)?;
 
         let bytes = self.get_byte_slice_mut(address, 0..size_in_bytes)?;
-        let target = try_cast_slice_mut(bytes).map_err(podcast_error)?;
+        // let target = try_cast_slice_mut(bytes).map_err(podcast_error)?;
+        let target = must_cast_slice_mut(bytes);
 
         let iter = target.iter_mut().zip(items.iter());
         for (dst, src) in iter {
@@ -420,6 +421,7 @@ impl Memory {
         let range = range.start * item_size..range.end * item_size;
         let bytes = self.get_byte_slice_mut(address, range)?;
         try_cast_slice_mut(bytes).map_err(podcast_error)
+        // Ok(must_cast_slice_mut(bytes)) //.map_err(podcast_error)
     }
 
     pub fn alloc_string(&mut self, string: &str) -> Result<Series<u8>, MemoryError> {
