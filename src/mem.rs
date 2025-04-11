@@ -543,9 +543,10 @@ impl Memory {
             if items.len() != N {
                 return Err(MemoryError::OutOfBounds);
             }
-            for i in 0..N {
-                items[i] = values[i];
-            }
+            // for i in 0..N {
+            //     items[i] = values[i];
+            // }
+            items[..N].copy_from_slice(&values[..N]);
             Ok(())
         }
     }

@@ -61,39 +61,50 @@ fn bench_simple_parser(c: &mut Criterion) {
 
     group.bench_function("parse_int", |b| {
         b.iter_with_setup(
-            || BenchCollector::new(),
-            |mut collector| black_box(Parser::parse(black_box("123"), &mut collector).unwrap()),
+            BenchCollector::new,
+            |mut collector| {
+                Parser::parse(black_box("123"), &mut collector).unwrap();
+                black_box(())
+            },
         )
     });
 
     group.bench_function("parse_word", |b| {
         b.iter_with_setup(
-            || BenchCollector::new(),
-            |mut collector| black_box(Parser::parse(black_box("hello"), &mut collector).unwrap()),
+            BenchCollector::new,
+            |mut collector| {
+                Parser::parse(black_box("hello"), &mut collector).unwrap();
+                black_box(())
+            },
         )
     });
 
     group.bench_function("parse_string", |b| {
         b.iter_with_setup(
-            || BenchCollector::new(),
+            BenchCollector::new,
             |mut collector| {
-                black_box(Parser::parse(black_box("\"Hello, World!\""), &mut collector).unwrap())
+                Parser::parse(black_box("\"Hello, World!\""), &mut collector).unwrap();
+                black_box(())
             },
         )
     });
 
     group.bench_function("parse_simple_block", |b| {
         b.iter_with_setup(
-            || BenchCollector::new(),
-            |mut collector| black_box(Parser::parse(black_box("[1 2 3]"), &mut collector).unwrap()),
+            BenchCollector::new,
+            |mut collector| {
+                Parser::parse(black_box("[1 2 3]"), &mut collector).unwrap();
+                black_box(())
+            },
         )
     });
 
     group.bench_function("parse_nested_block", |b| {
         b.iter_with_setup(
-            || BenchCollector::new(),
+            BenchCollector::new,
             |mut collector| {
-                black_box(Parser::parse(black_box("[1 [2 3] 4]"), &mut collector).unwrap())
+                Parser::parse(black_box("[1 [2 3] 4]"), &mut collector).unwrap();
+                black_box(())
             },
         )
     });
@@ -110,7 +121,7 @@ fn bench_realistic_parsing(c: &mut Criterion) {
         let program = r#"[set x 10 set y 20 print "The sum is:" print "result" if true [print "x is greater than 5"]]"#;
 
         b.iter_with_setup(
-            || BenchCollector::new(),
+            BenchCollector::new,
             |mut collector| {
                 // Parse the program and handle any errors
                 match Parser::parse(black_box(program), &mut collector) {
@@ -129,7 +140,7 @@ fn bench_realistic_parsing(c: &mut Criterion) {
         let data = r#"[name: "Product" id: 12345 price: 9995 in-stock: true tags: ["electronics" "gadget" "smartphone"] dimensions: [width: 5 height: 2 depth: 1] reviews: [[name: "User1" rating: 5 comment: "Great product!"] [name: "User2" rating: 4 comment: "Good value for money"] [name: "User3" rating: 3 comment: "Decent, but could be better"]]]"#;
 
         b.iter_with_setup(
-            || BenchCollector::new(),
+            BenchCollector::new,
             |mut collector| {
                 match Parser::parse(black_box(data), &mut collector) {
                     Ok(()) => (),
@@ -147,7 +158,7 @@ fn bench_realistic_parsing(c: &mut Criterion) {
         let expressions = r#"[1 2 3 4 5 6 7 8 9 10]"#;
 
         b.iter_with_setup(
-            || BenchCollector::new(),
+            BenchCollector::new,
             |mut collector| match Parser::parse(black_box(expressions), &mut collector) {
                 Ok(()) => (),
                 Err(e) => {
@@ -164,7 +175,7 @@ fn bench_realistic_parsing(c: &mut Criterion) {
             r#"[func [x] [print x] func [a b] [print a print b] print "Function example"]"#;
 
         b.iter_with_setup(
-            || BenchCollector::new(),
+            BenchCollector::new,
             |mut collector| match Parser::parse(black_box(function), &mut collector) {
                 Ok(()) => (),
                 Err(e) => {
@@ -180,7 +191,7 @@ fn bench_realistic_parsing(c: &mut Criterion) {
         let paths = r#"[system/options/path: "path" user/name: "John" options/width: 800 options/height: 600]"#;
 
         b.iter_with_setup(
-            || BenchCollector::new(),
+            BenchCollector::new,
             |mut collector| {
                 match Parser::parse(black_box(paths), &mut collector) {
                     Ok(()) => (),
@@ -207,27 +218,30 @@ fn bench_parser_scalability(c: &mut Criterion) {
     // Benchmark parsing lists of different sizes
     group.bench_function("list_size_10", |b| {
         b.iter_with_setup(
-            || BenchCollector::new(),
+            BenchCollector::new,
             |mut collector| {
-                black_box(Parser::parse(black_box(&list_small), &mut collector).unwrap())
+                Parser::parse(black_box(&list_small), &mut collector).unwrap();
+                black_box(())
             },
         )
     });
 
     group.bench_function("list_size_100", |b| {
         b.iter_with_setup(
-            || BenchCollector::new(),
+            BenchCollector::new,
             |mut collector| {
-                black_box(Parser::parse(black_box(&list_medium), &mut collector).unwrap())
+                Parser::parse(black_box(&list_medium), &mut collector).unwrap();
+                black_box(())
             },
         )
     });
 
     group.bench_function("list_size_1000", |b| {
         b.iter_with_setup(
-            || BenchCollector::new(),
+            BenchCollector::new,
             |mut collector| {
-                black_box(Parser::parse(black_box(&list_large), &mut collector).unwrap())
+                Parser::parse(black_box(&list_large), &mut collector).unwrap();
+                black_box(())
             },
         )
     });
@@ -236,16 +250,22 @@ fn bench_parser_scalability(c: &mut Criterion) {
     group.bench_function("nested_depth_5", |b| {
         let nested = generate_nested_blocks(5);
         b.iter_with_setup(
-            || BenchCollector::new(),
-            |mut collector| black_box(Parser::parse(black_box(&nested), &mut collector).unwrap()),
+            BenchCollector::new,
+            |mut collector| {
+                Parser::parse(black_box(&nested), &mut collector).unwrap();
+                black_box(())
+            },
         )
     });
 
     group.bench_function("nested_depth_10", |b| {
         let nested = generate_nested_blocks(10);
         b.iter_with_setup(
-            || BenchCollector::new(),
-            |mut collector| black_box(Parser::parse(black_box(&nested), &mut collector).unwrap()),
+            BenchCollector::new,
+            |mut collector| {
+                Parser::parse(black_box(&nested), &mut collector).unwrap();
+                black_box(())
+            },
         )
     });
 
