@@ -148,6 +148,8 @@ impl Value {
     pub const FLOAT: Type = 9;
     pub const NATIVE_FUNC: Type = 10;
 
+    pub const VALUE_NONE: Value = Self(Self::NONE, 0);
+
     pub fn new(kind: Type, data: Word) -> Self {
         Self(kind, data)
     }
@@ -304,6 +306,14 @@ impl NativeFunc {
             arity: arity as Short,
             desc: desc.address,
         }
+    }
+
+    pub fn arity(&self) -> Short {
+        self.arity
+    }
+
+    pub fn func_id(&self) -> Short {
+        self.id
     }
 }
 
@@ -502,10 +512,14 @@ impl Memory {
         self.memory.get(address).copied()
     }
 
+    pub fn get_u16_ne(&self, address: usize) -> Option<Short> {
+        let bytes = self.memory.get(address..address + 2)?;
+        bytes.try_into().ok().map(u16::from_ne_bytes)
+    }
+
     pub fn get_u32_ne(&self, address: usize) -> Option<Word> {
         let bytes = self.memory.get(address..address + 4)?;
-        let word = u32::from_ne_bytes(bytes.try_into().ok()?);
-        Some(word)
+        bytes.try_into().ok().map(u32::from_ne_bytes)
     }
 
     pub fn len<I>(&self, series: Series<I>) -> Result<Offset, MemoryError> {
@@ -805,12 +819,7 @@ impl Memory {
         }
     }
 
-    pub fn set_word_str(&mut self, symbol: &str, value: Value) -> Result<(), MemoryError> {
-        let symbol = self.get_or_add_symbol(symbol)?;
-        self.set_word(symbol.address, value)
-    }
-
-    pub fn set_word(&mut self, symbol: Address, value: Value) -> Result<(), MemoryError> {
+    pub fn bind_word(&mut self, symbol: Address, create: bool) -> Result<Address, MemoryError> {
         const KV_SIZE: Offset = std::mem::size_of::<KeyValue>() as Offset;
 
         let header = self.get_mut::<MemHeader>(0)?;
@@ -829,14 +838,16 @@ impl Memory {
             let offset = system_words + Block::SIZE + idx * KV_SIZE;
             let item = self.get_mut::<KeyValue>(offset)?;
             if item.key == symbol {
-                item.value = value;
-                return Ok(());
+                return Ok(offset + 4);
             } else if item.key == 0 {
+                if !create {
+                    return Err(MemoryError::WordNotFound);
+                }
                 item.key = symbol;
-                item.value = value;
+                item.value = Value::VALUE_NONE;
                 let block = self.get_mut::<Block>(system_words)?;
                 block.len += 1;
-                return Ok(());
+                return Ok(offset + 4);
             } else {
                 idx += 1;
                 if idx >= cap {
@@ -847,6 +858,18 @@ impl Memory {
                 }
             }
         }
+    }
+
+    pub fn set_word_str(&mut self, symbol: &str, value: Value) -> Result<(), MemoryError> {
+        let symbol = self.get_or_add_symbol(symbol)?;
+        self.set_word(symbol.address, value)
+    }
+
+    pub fn set_word(&mut self, symbol: Address, value: Value) -> Result<(), MemoryError> {
+        let address = self.bind_word(symbol, true)?;
+        let item = self.get_mut::<Value>(address)?;
+        *item = value;
+        Ok(())
     }
 }
 

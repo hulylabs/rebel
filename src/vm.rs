@@ -3,7 +3,7 @@
 use std::mem::zeroed;
 
 use crate::mem::{
-    Address, Block, Memory, MemoryError, NativeFunc, Offset, Series, Type, Value, Word,
+    Address, Block, Memory, MemoryError, NativeFunc, Series, Short, Type, Value, Word,
 };
 use crate::parse::{Collector, Parser, ParserError, WordKind};
 use thiserror::Error;
@@ -27,14 +27,13 @@ type Op = u8;
 pub struct Code;
 
 impl Code {
-    // const HALT: Op = 0;
+    const RET: Op = 0;
     const CONST: Op = 1;
     const NONE: Op = 2;
     const WORD: Op = 3;
     const SET_WORD: Op = 4;
     const LEAVE: Op = 5;
-    pub const ADD: Op = 6;
-    // const EITHER: Op = 7;
+    const CALL_NATIVE: Op = 6;
 }
 
 //
@@ -42,17 +41,18 @@ impl Code {
 #[derive(Debug, Clone, Copy)]
 enum Call {
     SetWord(Address),
+    CallNative(Short),
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Defer {
     call: Call,
-    bp: Offset,
-    arity: Word,
+    bp: Short,
+    arity: Short,
 }
 
 impl Defer {
-    fn new(call: Call, bp: Offset, arity: Word) -> Self {
+    fn new(call: Call, bp: Short, arity: Short) -> Self {
         Defer { call, bp, arity }
     }
 }
@@ -117,24 +117,6 @@ impl Vm {
         Parser::parse_block(input, &mut collector)?;
         collector.stack.pop().map_err(Into::into)
     }
-
-    pub fn start(&mut self) -> Result<(), MemoryError> {
-        let descs = crate::stdlib::NATIVES;
-        let natives = self.memory.alloc::<NativeFunc>(descs.len())?;
-
-        for native in descs {
-            let symbol = self.memory.get_or_add_symbol(native.name)?;
-            let description = self.memory.alloc_string(native.description)?;
-            let id = self.natives.len();
-            self.natives.push(native.func);
-            let native = NativeFunc::new(id, native.arity, description);
-            let address = self.memory.push(natives, native)?;
-            self.memory
-                .set_word(symbol.address(), Value::native(address))?;
-        }
-
-        Ok(())
-    }
 }
 
 //
@@ -153,6 +135,14 @@ where
             data: unsafe { zeroed() },
             len: 0,
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     pub fn push(&mut self, value: T) -> Result<(), MemoryError> {
@@ -255,6 +245,12 @@ impl InstructionPointer {
         Ok(result)
     }
 
+    fn read_u16(&mut self, memory: &Memory) -> Result<u16, MemoryError> {
+        let result = memory.get_u16_ne(self.0).ok_or(MemoryError::OutOfBounds)?;
+        self.0 += 2;
+        Ok(result)
+    }
+
     fn read_u32(&mut self, memory: &Memory) -> Result<u32, MemoryError> {
         let result = memory.get_u32_ne(self.0).ok_or(MemoryError::OutOfBounds)?;
         self.0 += 4;
@@ -294,15 +290,20 @@ impl<'a> Process<'a> {
         let end = ip + len * Value::SIZE;
         let mut stack_len = 0;
 
-        while ip < end {
+        // while ip < end || !defer_stack.is_empty() {
+        loop {
             while let Some(defer) = defer_stack.last() {
                 if stack_len == defer.bp + defer.arity {
                     stack_len -= defer.arity;
                     stack_len += 1;
                     match defer.call {
-                        Call::SetWord(symbol) => {
+                        Call::SetWord(binding) => {
                             code_stack.push(Code::SET_WORD)?;
-                            code_stack.extend(&u32::to_ne_bytes(symbol))?;
+                            code_stack.extend(&u32::to_ne_bytes(binding))?;
+                        }
+                        Call::CallNative(func_id) => {
+                            code_stack.push(Code::CALL_NATIVE)?;
+                            code_stack.extend(&u16::to_ne_bytes(func_id))?;
                         }
                     }
                     defer_stack.drop()?;
@@ -311,15 +312,43 @@ impl<'a> Process<'a> {
                 }
             }
 
-            let value = self.vm.memory.get::<Value>(ip)?;
+            if ip >= end {
+                break;
+            }
+
+            let value = {
+                let value = self.vm.memory.get::<Value>(ip).copied()?;
+                if value.kind() == Value::WORD {
+                    let resolved = self.vm.memory.get_word(value.data())?;
+                    if resolved.kind() == Value::NATIVE_FUNC {
+                        resolved
+                    } else {
+                        value
+                    }
+                } else {
+                    value
+                }
+            };
+
             match value.kind() {
                 Value::WORD => {
+                    let symbol = value.data();
+                    let binding = self.vm.memory.bind_word(symbol, false)?;
                     code_stack.push(Code::WORD)?;
-                    code_stack.extend(&u32::to_ne_bytes(value.data()))?;
+                    code_stack.extend(&u32::to_ne_bytes(binding))?;
                     stack_len += 1;
                 }
                 Value::SET_WORD => {
-                    let defer = Defer::new(Call::SetWord(value.data()), stack_len, 1);
+                    let symbol = value.data();
+                    let word_address = self.vm.memory.bind_word(symbol, true)?;
+                    let defer = Defer::new(Call::SetWord(word_address), stack_len, 1);
+                    defer_stack.push(defer)?;
+                }
+                Value::NATIVE_FUNC => {
+                    let native_func = self.vm.memory.get::<NativeFunc>(value.data())?;
+                    let arity = native_func.arity();
+                    let defer =
+                        Defer::new(Call::CallNative(native_func.func_id()), stack_len, arity);
                     defer_stack.push(defer)?;
                 }
                 _ => {
@@ -336,17 +365,12 @@ impl<'a> Process<'a> {
             1 => {}
             n => code_stack.extend(&[Code::LEAVE, n as u8])?,
         }
-        // code_stack.push(Code::HALT)?;
-
+        code_stack.push(Code::RET)?;
         self.vm.memory.alloc_items(code_stack.as_slice()?)
     }
 
     pub fn exec(&mut self, code_block: Series<u8>) -> Result<Value, VmError> {
-        // let mut ip = InstructionPointer::new(code_block);
         self.ip.jmp(code_block);
-
-        // let code = self.vm.memory.get_bytes(code_block.address())?;
-        // let mut reader = CodeReader::new(code);
 
         while let Some(op) = self.ip.read_code(&self.vm.memory) {
             match op {
@@ -356,33 +380,35 @@ impl<'a> Process<'a> {
                         .push(Value::new(kind, self.ip.read_u32(&self.vm.memory)?))?;
                 }
                 Code::WORD => {
-                    let symbol = self.ip.read_u32(&self.vm.memory)?;
-                    let value = self.vm.memory.get_word(symbol)?;
+                    let binding = self.ip.read_u32(&self.vm.memory)?;
+                    let value = self.vm.memory.get(binding).copied()?;
                     self.stack.push(value)?;
                 }
                 Code::SET_WORD => {
-                    let symbol = self.ip.read_u32(&self.vm.memory)?;
+                    let binding = self.ip.read_u32(&self.vm.memory)?;
                     let value = self
                         .stack
                         .last()
                         .copied()
                         .ok_or(MemoryError::StackUnderflow)?;
-                    self.vm.memory.set_word(symbol, value)?;
+                    let item = self.vm.memory.get_mut(binding)?;
+                    *item = value;
                 }
                 Code::LEAVE => {
                     let drop = self.ip.read_u8(&self.vm.memory)? as usize;
                     self.stack.nip(drop)?;
+                }
+                Code::RET => {
                     break;
                 }
                 Code::NONE => self.stack.push(Value::new(Value::NONE, 0))?,
-                Code::ADD => {
-                    let [va, vb] = self.stack.pop_n()?;
-                    let a = va.as_int()?;
-                    let b = vb.as_int()?;
-                    let result = a.checked_add(b).ok_or(VmError::IntegerOverflow)?;
-                    self.stack.push(Value::int(result))?;
+                Code::CALL_NATIVE => {
+                    let func_id = self.ip.read_u16(&self.vm.memory)?;
+                    let native_func = self.vm.natives[func_id as usize];
+                    native_func(self)?;
                 }
                 _ => {
+                    println!("Unknown code: {}", op);
                     return Err(VmError::InvalidCode);
                 }
             }
@@ -717,6 +743,7 @@ mod tests {
                 0,
                 Code::LEAVE,
                 3,
+                Code::RET,
             ] => {}
             _ => panic!("Unexpected code sequence: {:?}", code),
         }
@@ -754,6 +781,7 @@ mod tests {
                 y4,
                 Code::LEAVE,
                 2,
+                Code::RET,
             ] => {
                 assert_eq!(
                     [x1, x2, x3, x4],
@@ -807,6 +835,7 @@ mod tests {
                 m4,
                 Code::LEAVE,
                 2,
+                Code::RET,
             ] => {
                 let x = [x1, x2, x3, x4];
                 let y = [y1, y2, y3, y4];
@@ -824,7 +853,6 @@ mod tests {
         Ok(())
     }
 
-    // Test compilation of empty block
     #[test]
     fn test_compile_empty_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
@@ -835,7 +863,41 @@ mod tests {
         let code = process.vm.memory.get_items(code_block)?;
 
         match code {
-            [Code::NONE] => {}
+            [Code::NONE, Code::RET] => {}
+            _ => panic!("Unexpected code sequence: {:?}", code),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_compile_native_call() -> Result<(), VmError> {
+        let mut vm = create_test_vm()?;
+        let block = vm.parse_block("add 7 8")?;
+
+        let mut process = Process::new(&mut vm);
+        let code_block = process.compile(block.as_block()?)?;
+        let code = process.vm.memory.get_items(code_block)?;
+
+        match code {
+            [
+                Code::CONST,
+                TYPE_INT,
+                7,
+                0,
+                0,
+                0,
+                Code::CONST,
+                TYPE_INT,
+                8,
+                0,
+                0,
+                0,
+                Code::CALL_NATIVE,
+                0,
+                0,
+                Code::RET,
+            ] => {}
             _ => panic!("Unexpected code sequence: {:?}", code),
         }
 
@@ -867,6 +929,36 @@ mod tests {
 
         let result = process.exec(code_block)?;
         assert_eq!(result, Value::int(42), "Expected result to be 3");
+        assert_eq!(process.stack.len, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_exec_3() -> Result<(), VmError> {
+        let mut vm = create_test_vm()?;
+        let block = vm.parse_block("add 7 8")?;
+
+        let mut process = Process::new(&mut vm);
+        let code_block = process.compile(block.as_block()?)?;
+
+        let result = process.exec(code_block)?;
+        assert_eq!(result, Value::int(15));
+        assert_eq!(process.stack.len, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_exec_4() -> Result<(), VmError> {
+        let mut vm = create_test_vm()?;
+        let block = vm.parse_block("add add 7 8 10")?;
+
+        let mut process = Process::new(&mut vm);
+        let code_block = process.compile(block.as_block()?)?;
+
+        let result = process.exec(code_block)?;
+        assert_eq!(result, Value::int(25));
         assert_eq!(process.stack.len, 0);
 
         Ok(())
