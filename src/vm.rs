@@ -30,6 +30,7 @@ impl Code {
     const SET_WORD: Op = 4;
     const LEAVE: Op = 5;
     const ADD: Op = 6;
+    const EITHER: Op = 7;
 }
 
 //
