@@ -590,6 +590,7 @@ mod tests {
     use crate::mem::{MemoryError, Value};
 
     const TYPE_INT: u8 = Value::INT as u8;
+    const TYPE_BLOCK: u8 = Value::BLOCK as u8;
 
     // Helper function to create a test memory
     fn create_test_vm() -> Result<Vm, MemoryError> {
@@ -1023,6 +1024,45 @@ mod tests {
                 Code::CALL_NATIVE,
                 1,
                 0,
+                Code::RET,
+            ] => {}
+            _ => panic!("Unexpected code sequence: {:?}", code),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_compile_func() -> Result<(), VmError> {
+        let mut vm = create_test_vm()?;
+        let block = vm.parse_block("f: func [] [1 + 2]")?;
+
+        let mut process = Process::new(&mut vm);
+        let code_block = process.compile(block.as_block()?)?;
+        let code = process.vm.memory.get_items(code_block)?;
+
+        match code {
+            [
+                Code::CONST,
+                TYPE_BLOCK,
+                _,
+                _,
+                _,
+                _,
+                Code::CONST,
+                TYPE_BLOCK,
+                _,
+                _,
+                _,
+                _,
+                Code::CALL_NATIVE,
+                5,
+                0,
+                Code::SET_WORD,
+                _,
+                _,
+                _,
+                _,
                 Code::RET,
             ] => {}
             _ => panic!("Unexpected code sequence: {:?}", code),
