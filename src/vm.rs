@@ -1004,78 +1004,32 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_exec_1() -> Result<(), VmError> {
+    fn run_test_exec(input: &str, expected: Value) -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let block = vm.parse_block("1 2 3")?;
+        let block = vm.parse_block(input)?;
 
         let mut process = Process::new(&mut vm);
         let code_block = process.compile(block.as_block()?)?;
 
         let result = process.exec(code_block)?;
-        assert_eq!(result, Value::int(3), "Expected result to be 3");
-        assert_eq!(process.stack.len, 0);
+        assert_eq!(result, expected, "Expected result does not match");
+        assert_eq!(process.stack.len, 0, "Expected stack to be empty");
 
         Ok(())
     }
 
     #[test]
-    fn test_exec_2() -> Result<(), VmError> {
-        let mut vm = create_test_vm()?;
-        let block = vm.parse_block("x: y: 42 z: 5 y")?;
-
-        let mut process = Process::new(&mut vm);
-        let code_block = process.compile(block.as_block()?)?;
-
-        let result = process.exec(code_block)?;
-        assert_eq!(result, Value::int(42), "Expected result to be 3");
-        assert_eq!(process.stack.len, 0);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_exec_3() -> Result<(), VmError> {
-        let mut vm = create_test_vm()?;
-        let block = vm.parse_block("add 7 8")?;
-
-        let mut process = Process::new(&mut vm);
-        let code_block = process.compile(block.as_block()?)?;
-
-        let result = process.exec(code_block)?;
-        assert_eq!(result, Value::int(15));
-        assert_eq!(process.stack.len, 0);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_exec_4() -> Result<(), VmError> {
-        let mut vm = create_test_vm()?;
-        let block = vm.parse_block("add add 7 8 10")?;
-
-        let mut process = Process::new(&mut vm);
-        let code_block = process.compile(block.as_block()?)?;
-
-        let result = process.exec(code_block)?;
-        assert_eq!(result, Value::int(25));
-        assert_eq!(process.stack.len, 0);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_exec_5() -> Result<(), VmError> {
-        let mut vm = create_test_vm()?;
-        let block = vm.parse_block("5 + 5")?;
-
-        let mut process = Process::new(&mut vm);
-        let code_block = process.compile(block.as_block()?)?;
-
-        let result = process.exec(code_block)?;
-        assert_eq!(result, Value::int(10));
-        assert_eq!(process.stack.len, 0);
-
+    fn test_exec_simple() -> Result<(), VmError> {
+        run_test_exec("1 2 3", Value::int(3))?;
+        run_test_exec("x: y: 42 z: 5 y", Value::int(42))?;
+        run_test_exec("x: 5 x", Value::int(5))?;
+        run_test_exec("add add 7 8 10", Value::int(25))?;
+        run_test_exec("5 + 5", Value::int(10))?;
+        run_test_exec("5 < 10", Value::bool(true))?;
+        run_test_exec("either 5 < 10 [42] [24]", Value::int(42))?;
+        run_test_exec("either 15 < 1 [42] [24]", Value::int(24))?;
+        run_test_exec("either 5 < 10 [1 2 3] [24]", Value::int(3))?;
+        run_test_exec("either 15 < 1 [42] [22 7 + 8]", Value::int(15))?;
         Ok(())
     }
 }

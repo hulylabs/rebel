@@ -14,6 +14,16 @@ fn add(process: &mut Process) -> Result<(), VmError> {
         .map_err(Into::into)
 }
 
+fn lt(process: &mut Process) -> Result<(), VmError> {
+    let [va, vb] = process.get_stack_mut().pop_n()?;
+    let a = va.as_int()?;
+    let b = vb.as_int()?;
+    process
+        .get_stack_mut()
+        .push(Value::bool(a < b))
+        .map_err(Into::into)
+}
+
 fn either(process: &mut Process) -> Result<(), VmError> {
     let [cond, if_true, if_false] = process.get_stack_mut().pop_n()?;
     let cond = cond.as_bool()?;
@@ -26,7 +36,9 @@ fn either(process: &mut Process) -> Result<(), VmError> {
 
 /// Native Function of The Standard Library for the Rebel VM.
 pub const NATIVES: &[NativeDescriptor] = &[
-    NativeDescriptor::new("add", "add two numbers", add, 2),
+    NativeDescriptor::new("add", "add two numbers function", add, 2),
     NativeDescriptor::new_op("+", "add two numbers operator", add, 1, 2),
+    NativeDescriptor::new("lt", "less than function", lt, 2),
+    NativeDescriptor::new_op("<", "less than operator", lt, 1, 2),
     NativeDescriptor::new("either", "execute one of two blocks", either, 3),
 ];

@@ -417,7 +417,7 @@ where
                 ']' => Some(char),
                 '"' => self.parse_string(pos)?,
                 ':' => self.parse_word(pos)?, // Special handling for get-words
-                c if c.is_ascii_alphabetic() => self.parse_word(pos)?,
+                c if c.is_ascii_alphabetic() || c == '<' || c == '>' => self.parse_word(pos)?,
                 c if c.is_ascii_digit() || c == '+' || c == '-' => self.parse_number(c)?,
                 _ => return Err(ParserError::UnexpectedChar(char)),
             };
