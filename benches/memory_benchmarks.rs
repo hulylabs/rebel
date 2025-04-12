@@ -1,25 +1,25 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rebel::mem::{Memory, Value};
 
-fn bench_value_operations(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Value Operations");
+// fn bench_value_operations(c: &mut Criterion) {
+//     let mut group = c.benchmark_group("Value Operations");
 
-    group.bench_function("value_creation", |b| {
-        b.iter(|| black_box(Value::int(black_box(42))))
-    });
+//     group.bench_function("value_creation", |b| {
+//         b.iter(|| black_box(Value::int(black_box(42))))
+//     });
 
-    group.bench_function("value_is_type_check", |b| {
-        let value = Value::int(42);
-        b.iter(|| black_box(value.is_int()))
-    });
+//     group.bench_function("value_is_type_check", |b| {
+//         let value = Value::int(42);
+//         b.iter(|| black_box(value.is_int()))
+//     });
 
-    group.bench_function("value_type_conversion", |b| {
-        let value = Value::int(42);
-        b.iter(|| black_box(value.as_int().ok()))
-    });
+//     group.bench_function("value_type_conversion", |b| {
+//         let value = Value::int(42);
+//         b.iter(|| black_box(value.as_int().ok()))
+//     });
 
-    group.finish();
-}
+//     group.finish();
+// }
 
 fn bench_realistic_memory_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("Realistic Memory Operations");
@@ -75,42 +75,25 @@ fn bench_realistic_memory_operations(c: &mut Criterion) {
                 Memory::new(1024 * 1024).unwrap()
             },
             |mut memory| {
-                // Create nested lists - a main list with 5 sublists
                 let main_list = memory.alloc::<Value>(10).unwrap();
 
-                // Create and fill 5 sublists
-                for i in 0..5 {
+                for i in 0..10 {
                     let sublist = memory.alloc::<Value>(10).unwrap();
-
-                    // Fill each sublist with 10 values
                     for j in 0..10 {
                         memory.push(sublist, Value::int(i * 10 + j)).unwrap();
                     }
-
-                    // Add the sublist to the main list
                     memory.push(main_list, Value::block(sublist)).unwrap();
                 }
 
-                // Simulate traversing the nested structure
                 let mut sum = 0;
                 for i in 0..memory.len(main_list).unwrap() {
-                    // Get sublist at index i
-                    let val = memory
-                        .get::<Value>(main_list.address() + 2 + i * 2)
-                        .unwrap();
+                    let val = memory.get_item(main_list, i).unwrap();
+                    let sublist = val.as_block().unwrap();
+                    let sublist_len = memory.len(sublist).unwrap();
 
-                    if val.is_block() {
-                        let sublist = val.as_block().unwrap();
-                        let sublist_len = memory.len(sublist).unwrap();
-
-                        // Sum all values in the sublist
-                        for j in 0..sublist_len {
-                            let subval =
-                                memory.get::<Value>(sublist.address() + 2 + j * 2).unwrap();
-                            if subval.is_int() {
-                                sum += subval.as_int().unwrap();
-                            }
-                        }
+                    for j in 0..sublist_len {
+                        let subval = memory.get_item(sublist, j).unwrap();
+                        sum += subval.as_int().unwrap();
                     }
                 }
 
@@ -161,7 +144,7 @@ fn bench_realistic_memory_operations(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_value_operations,
+    // bench_value_operations,
     bench_realistic_memory_operations
 );
 criterion_main!(benches);

@@ -462,6 +462,21 @@ impl Memory {
         self.get_items_slice(series, 0..len)
     }
 
+    pub fn get_item<I: AnyBitPattern>(
+        &self,
+        series: Series<I>,
+        index: Offset,
+    ) -> Result<&I, MemoryError> {
+        let block = self.get::<Block>(series.address)?;
+        let len = block.len;
+        if index >= len {
+            Err(MemoryError::OutOfBounds)
+        } else {
+            let item_size = std::mem::size_of::<I>() as Offset;
+            self.get(series.address + Block::SIZE + index * item_size)
+        }
+    }
+
     pub fn get<I: AnyBitPattern>(&self, address: Address) -> Result<&I, MemoryError> {
         let address = address as usize;
         let bytes = self
