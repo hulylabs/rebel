@@ -18,6 +18,8 @@ pub enum VmError {
     InvalidCode,
     #[error("Integer overflow")]
     IntegerOverflow,
+    #[error("bad native function index")]
+    BadNativeFunctionIndex,
 }
 
 //
@@ -404,11 +406,14 @@ impl<'a> Process<'a> {
                 Code::NONE => self.stack.push(Value::new(Value::NONE, 0))?,
                 Code::CALL_NATIVE => {
                     let func_id = self.ip.read_u16(&self.vm.memory)?;
-                    let native_func = self.vm.natives[func_id as usize];
+                    let native_func = self
+                        .vm
+                        .natives
+                        .get(func_id as usize)
+                        .ok_or(VmError::BadNativeFunctionIndex)?;
                     native_func(self)?;
                 }
                 _ => {
-                    println!("Unknown code: {}", op);
                     return Err(VmError::InvalidCode);
                 }
             }
