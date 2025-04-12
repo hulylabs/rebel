@@ -3,7 +3,7 @@
 use std::mem::zeroed;
 
 use crate::mem::{
-    Address, Block, Memory, MemoryError, NativeFunc, Series, Short, Type, Value, Word,
+    Address, Block, Func, Memory, MemoryError, NativeFunc, Series, Short, Type, Value, Word,
 };
 use crate::parse::{Collector, Parser, ParserError, WordKind};
 use thiserror::Error;
@@ -36,6 +36,7 @@ impl Code {
     const SET_WORD: Op = 4;
     const LEAVE: Op = 5;
     const CALL_NATIVE: Op = 6;
+    const CALL_FUNC: Op = 7;
 }
 
 //
@@ -44,6 +45,7 @@ impl Code {
 enum Call {
     SetWord(Address),
     CallNative(Short),
+    CallFunc(Address),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -346,6 +348,10 @@ impl<'a> Process<'a> {
                             code_stack.push(Code::CALL_NATIVE)?;
                             code_stack.extend(&u16::to_ne_bytes(func_id))?;
                         }
+                        Call::CallFunc(func_address) => {
+                            code_stack.push(Code::CALL_FUNC)?;
+                            code_stack.extend(&u32::to_ne_bytes(func_address))?;
+                        }
                     }
                     defer_stack.drop()?;
                 } else {
@@ -361,7 +367,7 @@ impl<'a> Process<'a> {
                 let value = self.vm.memory.get::<Value>(ip).copied()?;
                 if value.kind() == Value::WORD {
                     let resolved = self.vm.memory.get_word(value.data())?;
-                    if resolved.kind() == Value::NATIVE_FUNC {
+                    if resolved.kind() == Value::NATIVE_FUNC || resolved.kind() == Value::FUNC {
                         resolved
                     } else {
                         value
@@ -395,6 +401,13 @@ impl<'a> Process<'a> {
                         arity,
                         consume,
                     );
+                    defer_stack.push(defer)?;
+                }
+                Value::FUNC => {
+                    let func_address = value.data();
+                    let func = self.vm.memory.get::<Func>(func_address)?;
+                    let arity = func.arity();
+                    let defer = Defer::new(Call::CallFunc(func_address), stack_len, arity, arity);
                     defer_stack.push(defer)?;
                 }
                 _ => {
@@ -481,6 +494,12 @@ impl<'a> Process<'a> {
                         .get(func_id as usize)
                         .ok_or(VmError::BadNativeFunctionIndex)?;
                     native_func(self)?;
+                }
+                Code::CALL_FUNC => {
+                    let func_address = self.ip.read_u32(&self.vm.memory)?;
+                    let func = self.vm.memory.get::<Func>(func_address)?;
+                    let body = func.body();
+                    self.call(Series::new(body))?;
                 }
                 _ => {
                     return Err(VmError::InvalidCode);

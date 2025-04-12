@@ -40,9 +40,11 @@ fn func(process: &mut Process) -> Result<(), VmError> {
     let body_block = body.as_block()?;
 
     let arity = process.memory().len(spec_block)?;
+    let body_bindings = process.get_binding(body_block)?;
+
     let func = process
         .memory_mut()
-        .alloc_struct(Func::new(arity, body_block))?;
+        .alloc_struct(Func::new(arity, body_bindings))?;
 
     process
         .get_stack_mut()

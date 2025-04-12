@@ -353,7 +353,7 @@ pub struct Func {
 }
 
 impl Func {
-    pub fn new(arity: Word, body: Series<Value>) -> Self {
+    pub fn new(arity: Word, body: Series<u8>) -> Self {
         Self {
             arity,
             body: body.address,
@@ -361,8 +361,8 @@ impl Func {
         }
     }
 
-    pub fn arity(&self) -> Word {
-        self.arity
+    pub fn arity(&self) -> u8 {
+        self.arity as u8
     }
 
     pub fn body(&self) -> Address {
