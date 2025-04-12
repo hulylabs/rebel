@@ -314,6 +314,14 @@ impl<'a> Process<'a> {
         &mut self.stack
     }
 
+    pub fn memory(&self) -> &Memory {
+        &self.vm.memory
+    }
+
+    pub fn memory_mut(&mut self) -> &mut Memory {
+        &mut self.vm.memory
+    }
+
     pub fn compile(&mut self, block: Series<Value>) -> Result<Series<u8>, MemoryError> {
         let mut defer_stack = ArrayStack::<Defer, 64>::new();
         let mut code_stack = ByteCode::new();

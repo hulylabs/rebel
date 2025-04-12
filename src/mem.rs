@@ -148,6 +148,7 @@ impl Value {
     pub const PATH: Type = 8;
     pub const FLOAT: Type = 9;
     pub const NATIVE_FUNC: Type = 10;
+    pub const FUNC: Type = 11;
 
     pub const VALUE_NONE: Value = Self(Self::NONE, 0);
 
@@ -194,6 +195,10 @@ impl Value {
 
     pub fn native(id: Word) -> Self {
         Value(Self::NATIVE_FUNC, id)
+    }
+
+    pub fn func(address: Address) -> Self {
+        Value(Self::FUNC, address)
     }
 
     /// Returns true if the value is of the given type
@@ -341,6 +346,34 @@ impl NativeFunc {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct Func {
+    arity: Word,
+    body: Address,
+    desc: Address,
+}
+
+impl Func {
+    pub fn new(arity: Word, body: Series<Value>) -> Self {
+        Self {
+            arity,
+            body: body.address,
+            desc: 0,
+        }
+    }
+
+    pub fn arity(&self) -> Word {
+        self.arity
+    }
+
+    pub fn body(&self) -> Address {
+        self.body
+    }
+}
+
+//
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct MemHeader {
     dead_beef: Word,
     heap_top: Address,
@@ -434,7 +467,29 @@ impl Memory {
         Ok(Series::new(address))
     }
 
-    #[allow(dead_code)]
+    pub fn alloc_struct<I: AnyBitPattern + NoUninit>(
+        &mut self,
+        item: I,
+    ) -> Result<Address, MemoryError> {
+        let len = self.memory.len() as Offset;
+        let cap = std::mem::size_of::<Offset>() + std::mem::size_of::<I>();
+        let cap = cap as Offset;
+        let header = self.get_mut::<MemHeader>(0)?;
+        let heap_top = header.heap_top;
+        let new_heap_top = heap_top + cap;
+        if new_heap_top > len {
+            Err(MemoryError::OutOfMemory)
+        } else {
+            header.heap_top = new_heap_top;
+            let block = self.get_mut::<Offset>(heap_top)?;
+            *block = cap;
+            let item_address = heap_top + 4;
+            let item_slot = self.get_mut::<I>(item_address)?;
+            *item_slot = item;
+            Ok(item_address)
+        }
+    }
+
     fn get_byte_slice(&self, address: Address, range: Range<Offset>) -> Result<&[u8], MemoryError> {
         let start = address + Block::SIZE + range.start;
         let end = address + Block::SIZE + range.end;
