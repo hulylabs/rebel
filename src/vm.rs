@@ -438,7 +438,7 @@ mod tests {
         let mut vm = create_test_vm()?;
         let mut process = Process::new(&mut vm)?;
 
-        let result = process.parse_block("3.14 -2.5 0.0")?;
+        let result = process.parse_block("5.14 -2.5 0.0")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
 
         assert_eq!(values.len(), 3, "Block should contain 3 floats");
@@ -449,7 +449,7 @@ mod tests {
         assert_eq!(values[2].kind(), Value::FLOAT);
 
         // Check values with approximate comparison
-        assert!((values[0].as_float()? - 3.14).abs() < 0.0001);
+        assert!((values[0].as_float()? - 5.14).abs() < 0.0001);
         assert!((values[1].as_float()? - (-2.5)).abs() < 0.0001);
         assert!((values[2].as_float()? - 0.0).abs() < 0.0001);
 
@@ -462,7 +462,7 @@ mod tests {
         let mut vm = create_test_vm()?;
         let mut process = Process::new(&mut vm)?;
 
-        let result = process.parse_block("42 3.14159 -10 -0.5")?;
+        let result = process.parse_block("42 5.14159 -10 -0.5")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
 
         assert_eq!(values.len(), 4, "Block should contain 4 values");
@@ -471,7 +471,7 @@ mod tests {
         assert_eq!(values[0].data(), 42);
 
         assert_eq!(values[1].kind(), Value::FLOAT);
-        assert!((values[1].as_float()? - 3.14159).abs() < 0.0001);
+        assert!((values[1].as_float()? - 5.14159).abs() < 0.0001);
 
         assert_eq!(values[2].kind(), Value::INT);
         assert_eq!(values[2].as_int()?, -10);
