@@ -565,19 +565,19 @@ impl Memory {
             .copied()
     }
 
-    pub fn pop_n<const N: usize, I: AnyBitPattern>(
-        &mut self,
-        series: Series<I>,
-    ) -> Result<&[I; N], MemoryError> {
-        let block = self.get_mut::<Block>(series.address)?;
-        let len = block.len;
-        let new_len = len
-            .checked_sub(N as Offset)
-            .ok_or(MemoryError::StackUnderflow)?;
-        block.len = new_len;
-        let slice = self.get_items_slice(series, new_len..len)?;
-        slice.try_into().map_err(Into::into)
-    }
+    // pub fn pop_n<const N: usize, I: AnyBitPattern>(
+    //     &mut self,
+    //     series: Series<I>,
+    // ) -> Result<&[I; N], MemoryError> {
+    //     let block = self.get_mut::<Block>(series.address)?;
+    //     let len = block.len;
+    //     let new_len = len
+    //         .checked_sub(N as Offset)
+    //         .ok_or(MemoryError::StackUnderflow)?;
+    //     block.len = new_len;
+    //     let slice = self.get_items_slice(series, new_len..len)?;
+    //     slice.try_into().map_err(Into::into)
+    // }
 
     pub fn peek<I: AnyBitPattern>(&self, series: Series<I>) -> Result<Option<&I>, MemoryError> {
         let item_size = std::mem::size_of::<I>() as Offset;
@@ -608,41 +608,41 @@ impl Memory {
         }
     }
 
-    pub fn drain<I: AnyBitPattern + NoUninit>(
-        &mut self,
-        from: Series<I>,
-        pos: Offset,
-    ) -> Result<Series<I>, MemoryError> {
-        let item_size = std::mem::size_of::<I>() as Offset;
+    // pub fn drain<I: AnyBitPattern + NoUninit>(
+    //     &mut self,
+    //     from: Series<I>,
+    //     pos: Offset,
+    // ) -> Result<Series<I>, MemoryError> {
+    //     let item_size = std::mem::size_of::<I>() as Offset;
 
-        let from_block = self.get_mut::<Block>(from.address)?;
-        let from_len = from_block.len;
-        let copy_len = from_len - pos;
-        from_block.len = pos;
+    //     let from_block = self.get_mut::<Block>(from.address)?;
+    //     let from_len = from_block.len;
+    //     let copy_len = from_len - pos;
+    //     from_block.len = pos;
 
-        let copy_bytes = copy_len * item_size;
-        let to_address = self.heap_alloc(copy_bytes, copy_len)?;
+    //     let copy_bytes = copy_len * item_size;
+    //     let to_address = self.heap_alloc(copy_bytes, copy_len)?;
 
-        let start = from.address + Block::SIZE + (pos * item_size);
-        let end = start + copy_bytes;
-        let start = start as usize;
-        let end = end as usize;
+    //     let start = from.address + Block::SIZE + (pos * item_size);
+    //     let end = start + copy_bytes;
+    //     let start = start as usize;
+    //     let end = end as usize;
 
-        if end > self.memory.len() {
-            return Err(MemoryError::OutOfBounds);
-        }
+    //     if end > self.memory.len() {
+    //         return Err(MemoryError::OutOfBounds);
+    //     }
 
-        let dst = to_address + Block::SIZE;
-        let dst = dst as usize;
-        let copy_bytes = copy_bytes as usize;
+    //     let dst = to_address + Block::SIZE;
+    //     let dst = dst as usize;
+    //     let copy_bytes = copy_bytes as usize;
 
-        if dst > self.memory.len() - copy_bytes {
-            return Err(MemoryError::OutOfBounds);
-        }
+    //     if dst > self.memory.len() - copy_bytes {
+    //         return Err(MemoryError::OutOfBounds);
+    //     }
 
-        self.memory.copy_within(start..end, dst);
-        Ok(Series::new(to_address))
-    }
+    //     self.memory.copy_within(start..end, dst);
+    //     Ok(Series::new(to_address))
+    // }
 
     pub fn drop<I>(&mut self, series: Series<I>, items: Offset) -> Result<(), MemoryError> {
         let block = self.get_mut::<Block>(series.address)?;
