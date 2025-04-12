@@ -1030,6 +1030,10 @@ mod tests {
         run_test_exec("either 15 < 1 [42] [24]", Value::int(24))?;
         run_test_exec("either 5 < 10 [1 2 3] [24]", Value::int(3))?;
         run_test_exec("either 15 < 1 [42] [22 7 + 8]", Value::int(15))?;
+        run_test_exec(
+            "either 5 < 10 [1 2 3] [24] either 15 < 1 [42] [22 7 + 8]",
+            Value::int(15),
+        )?;
         Ok(())
     }
 }
