@@ -1,5 +1,7 @@
 // Rebel™ © 2025 Huly Labs • https://hulylabs.com • SPDX-License-Identifier: MIT
 
+use std::mem::zeroed;
+
 use crate::mem::{Address, Block, Memory, MemoryError, Offset, Series, Type, Value, Word};
 use crate::parse::{Collector, Parser, ParserError, WordKind};
 use thiserror::Error;
@@ -20,7 +22,7 @@ pub enum VmError {
 
 type Op = u8;
 
-struct Code;
+pub struct Code;
 
 impl Code {
     // const HALT: Op = 0;
@@ -29,8 +31,8 @@ impl Code {
     const WORD: Op = 3;
     const SET_WORD: Op = 4;
     const LEAVE: Op = 5;
-    const ADD: Op = 6;
-    const EITHER: Op = 7;
+    pub const ADD: Op = 6;
+    // const EITHER: Op = 7;
 }
 
 //
@@ -53,19 +55,9 @@ impl Defer {
     }
 }
 
-impl Default for Defer {
-    fn default() -> Self {
-        Defer {
-            call: Call::SetWord(0),
-            bp: 0,
-            arity: 0,
-        }
-    }
-}
-
 //
 
-type InstrinsicFn = fn(&mut ByteCode);
+type InstrinsicFn = fn(&mut ByteCode) -> Result<(), MemoryError>;
 
 pub struct Vm {
     memory: Memory,
@@ -79,6 +71,12 @@ impl Vm {
             memory,
             instrinsics,
         })
+    }
+
+    pub fn parse_block(&mut self, input: &str) -> Result<Value, VmError> {
+        let mut collector = ParseCollector::new(&mut self.memory);
+        Parser::parse_block(input, &mut collector)?;
+        collector.stack.pop().map_err(Into::into)
     }
 
     pub fn start(&mut self) -> Result<Process, MemoryError> {
@@ -97,16 +95,16 @@ pub struct ArrayStack<T, const N: usize> {
 
 impl<T, const N: usize> ArrayStack<T, N>
 where
-    T: Copy + Default,
+    T: Copy,
 {
     fn new() -> Self {
         Self {
-            data: [T::default(); N],
+            data: unsafe { zeroed() },
             len: 0,
         }
     }
 
-    fn push(&mut self, value: T) -> Result<(), MemoryError> {
+    pub fn push(&mut self, value: T) -> Result<(), MemoryError> {
         self.data
             .get_mut(self.len)
             .map(|slot| {
@@ -114,6 +112,18 @@ where
                 self.len += 1;
             })
             .ok_or(MemoryError::StackOverflow)
+    }
+
+    fn pop(&mut self) -> Result<T, MemoryError> {
+        if self.len > 0 {
+            self.len -= 1;
+            self.data
+                .get(self.len)
+                .copied()
+                .ok_or(MemoryError::StackUnderflow)
+        } else {
+            Err(MemoryError::StackUnderflow)
+        }
     }
 
     fn extend<const L: usize>(&mut self, values: &[T; L]) -> Result<(), MemoryError> {
@@ -127,12 +137,8 @@ where
     }
 
     fn drop(&mut self) -> Result<(), MemoryError> {
-        if self.len > 0 {
-            self.len -= 1;
-            Ok(())
-        } else {
-            Err(MemoryError::StackUnderflow)
-        }
+        self.len = self.len.checked_sub(1).ok_or(MemoryError::StackUnderflow)?;
+        Ok(())
     }
 
     fn last(&self) -> Option<&T> {
@@ -141,6 +147,12 @@ where
 
     fn as_slice(&self) -> Result<&[T], MemoryError> {
         self.data.get(..self.len).ok_or(MemoryError::OutOfBounds)
+    }
+
+    fn drain(&mut self, pos: usize) -> Result<&[T], MemoryError> {
+        let len = self.len;
+        self.len = pos;
+        self.data.get(pos..len).ok_or(MemoryError::OutOfBounds)
     }
 }
 
@@ -178,19 +190,13 @@ impl InstructionPointer {
 pub struct Process<'a> {
     vm: &'a mut Vm,
     stack: Series<Value>,
-    pos_stack: Series<Offset>,
 }
 
 impl<'a> Process<'a> {
     pub fn new(vm: &'a mut Vm) -> Result<Self, MemoryError> {
         let stack = vm.memory.alloc::<Value>(64)?;
-        let pos_stack = vm.memory.alloc::<Offset>(64)?;
 
-        Ok(Self {
-            vm,
-            stack,
-            pos_stack,
-        })
+        Ok(Self { vm, stack })
     }
 
     pub fn add_instrinsic(
@@ -201,25 +207,6 @@ impl<'a> Process<'a> {
         let id = self.vm.instrinsics.len() as Word;
         self.vm.instrinsics.push(instrinsic);
         self.vm.memory.set_word_str(name, Value::intrinsic(id))
-    }
-
-    pub fn parse_block(&mut self, input: &str) -> Result<Value, VmError> {
-        Parser::parse_block(input, self)?;
-        self.vm.memory.pop(self.stack).map_err(Into::into)
-    }
-
-    fn begin(&mut self) -> Result<(), MemoryError> {
-        self.vm
-            .memory
-            .push(self.pos_stack, self.vm.memory.len(self.stack)?)
-    }
-
-    fn end(&mut self, kind: Type) -> Result<(), MemoryError> {
-        let pos = self.vm.memory.pop(self.pos_stack)?;
-        let block = self.vm.memory.drain(self.stack, pos)?;
-        self.vm
-            .memory
-            .push(self.stack, Value::new(kind, block.address()))
     }
 
     pub fn compile(&mut self, block: Series<Value>) -> Result<Series<u8>, MemoryError> {
@@ -328,32 +315,58 @@ impl<'a> Process<'a> {
     }
 }
 
-impl Collector for Process<'_> {
+//
+
+struct ParseCollector<'a> {
+    memory: &'a mut Memory,
+    stack: ArrayStack<Value, 256>,
+    pos_stack: ArrayStack<usize, 256>,
+}
+
+impl<'a> ParseCollector<'a> {
+    fn new(memory: &'a mut Memory) -> Self {
+        Self {
+            memory,
+            stack: ArrayStack::new(),
+            pos_stack: ArrayStack::new(),
+        }
+    }
+
+    fn begin(&mut self) -> Result<(), MemoryError> {
+        self.pos_stack.push(self.stack.len)
+    }
+
+    fn end(&mut self, kind: Type) -> Result<(), MemoryError> {
+        let pos = self.pos_stack.pop()?;
+        let block = self.memory.alloc_items(self.stack.drain(pos)?)?;
+        self.stack.push(Value::new(kind, block.address()))
+    }
+}
+
+impl Collector for ParseCollector<'_> {
     type Error = MemoryError;
 
     /// Called when a string is parsed
     fn string(&mut self, string: &str) -> Result<(), Self::Error> {
-        let string = self.vm.memory.alloc_string(string).map(Value::string)?;
-        self.vm.memory.push(self.stack, string)
+        let string = self.memory.alloc_string(string).map(Value::string)?;
+        self.stack.push(string)
     }
 
     /// Called when a word is parsed
     fn word(&mut self, kind: WordKind, symbol: &str) -> Result<(), Self::Error> {
         // let symbol = self.vm.memory.alloc_string(symbol)?;
-        let symbol = self.vm.memory.get_or_add_symbol(symbol)?;
-        self.vm
-            .memory
-            .push(self.stack, Value::any_word(kind, symbol))
+        let symbol = self.memory.get_or_add_symbol(symbol)?;
+        self.stack.push(Value::any_word(kind, symbol))
     }
 
     /// Called when an integer is parsed
     fn integer(&mut self, value: i32) -> Result<(), Self::Error> {
-        self.vm.memory.push(self.stack, Value::int(value))
+        self.stack.push(Value::int(value))
     }
 
     /// Called when a float is parsed
     fn float(&mut self, value: f32) -> Result<(), Self::Error> {
-        self.vm.memory.push(self.stack, Value::float(value))
+        self.stack.push(Value::float(value))
     }
 
     /// Called at the start of a block
@@ -393,9 +406,7 @@ mod tests {
     #[test]
     fn test_parse_1() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
-
-        let result = process.parse_block("x: 5 x")?;
+        let result = vm.parse_block("x: 5 x")?;
         let block = vm.memory.peek_at(result.as_block()?, 0)?;
 
         match block {
@@ -416,9 +427,7 @@ mod tests {
     #[test]
     fn test_parse_empty_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
-
-        let result = process.parse_block("")?;
+        let result = vm.parse_block("")?;
 
         assert_eq!(result.kind(), Value::BLOCK);
         assert!(result.data() > 0, "Block address should be valid");
@@ -433,13 +442,9 @@ mod tests {
     #[test]
     fn test_parse_integer_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let result = vm.parse_block("1 2 3")?;
 
-        let result = process.parse_block("1 2 3")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
-
-        assert_eq!(values.len(), 3, "Block should contain 3 integers");
-
         match values {
             [
                 Value(Value::INT, 1),
@@ -456,11 +461,9 @@ mod tests {
     #[test]
     fn test_parse_float_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let result = vm.parse_block("5.14 -2.5 0.0")?;
 
-        let result = process.parse_block("5.14 -2.5 0.0")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
-
         assert_eq!(values.len(), 3, "Block should contain 3 floats");
 
         // Check types
@@ -480,11 +483,9 @@ mod tests {
     #[test]
     fn test_parse_mixed_numeric_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let result = vm.parse_block("42 5.14159 -10 -0.5")?;
 
-        let result = process.parse_block("42 5.14159 -10 -0.5")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
-
         assert_eq!(values.len(), 4, "Block should contain 4 values");
 
         assert_eq!(values[0].kind(), Value::INT);
@@ -506,11 +507,9 @@ mod tests {
     #[test]
     fn test_parse_string_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let result = vm.parse_block("\"hello\" \"world\"")?;
 
-        let result = process.parse_block("\"hello\" \"world\"")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
-
         assert_eq!(values.len(), 2, "Block should contain 2 strings");
 
         assert_eq!(values[0].kind(), Value::STRING);
@@ -526,13 +525,9 @@ mod tests {
     #[test]
     fn test_parse_word_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let result = vm.parse_block("word set-word: :get-word")?;
 
-        let result = process.parse_block("word set-word: :get-word")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
-
-        assert_eq!(values.len(), 3, "Block should contain 3 values");
-
         match values {
             [
                 Value(Value::WORD, _),
@@ -549,11 +544,9 @@ mod tests {
     #[test]
     fn test_parse_nested_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let result = vm.parse_block("1 [2 3] 4")?;
 
-        let result = process.parse_block("1 [2 3] 4")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
-
         assert_eq!(values.len(), 3, "Block should contain 3 values");
 
         // Check outer structure
@@ -586,11 +579,9 @@ mod tests {
     #[test]
     fn test_parse_path() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let result = vm.parse_block("a/b c/d/e")?;
 
-        let result = process.parse_block("a/b c/d/e")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
-
         assert_eq!(values.len(), 2, "Block should contain 2 paths");
 
         // Both should be PATH type
@@ -611,10 +602,9 @@ mod tests {
     #[test]
     fn test_parse_errors() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
 
         // Invalid escape sequence
-        let result = process.parse_block("\"invalid \\z escape\"");
+        let result = vm.parse_block("\"invalid \\z escape\"");
         assert!(result.is_err(), "Should error on invalid escape sequence");
 
         Ok(())
@@ -626,9 +616,9 @@ mod tests {
         let mut vm = create_test_vm()?;
         let mut process = vm.start()?;
 
-        let block = process.parse_block("1 2 3")?;
+        let block = process.vm.parse_block("1 2 3")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.get_items(code_block)?;
+        let code = process.vm.memory.get_items(code_block)?;
 
         match code {
             [
@@ -665,9 +655,9 @@ mod tests {
         let mut vm = create_test_vm()?;
         let mut process = vm.start()?;
 
-        let block = process.parse_block("x: 5 x")?;
+        let block = process.vm.parse_block("x: 5 x")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.get_items(code_block)?;
+        let code = process.vm.memory.get_items(code_block)?;
 
         match code {
             [
@@ -708,9 +698,9 @@ mod tests {
         let mut vm = create_test_vm()?;
         let mut process = vm.start()?;
 
-        let block = process.parse_block("x: y: z: 42 y")?;
+        let block = process.vm.parse_block("x: y: z: 42 y")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.get_items(code_block)?;
+        let code = process.vm.memory.get_items(code_block)?;
 
         match code {
             [
@@ -765,9 +755,9 @@ mod tests {
         let mut vm = create_test_vm()?;
         let mut process = vm.start()?;
 
-        let block = process.parse_block("")?;
+        let block = process.vm.parse_block("")?;
         let code_block = process.compile(block.as_block()?)?;
-        let code = vm.memory.get_items(code_block)?;
+        let code = process.vm.memory.get_items(code_block)?;
 
         match code {
             [Code::NONE] => {}
@@ -782,7 +772,7 @@ mod tests {
         let mut vm = create_test_vm()?;
         let mut process = vm.start()?;
 
-        let block = process.parse_block("1 2 3")?;
+        let block = process.vm.parse_block("1 2 3")?;
         let code_block = process.compile(block.as_block()?)?;
 
         let result = process.exec(code_block)?;
@@ -797,7 +787,7 @@ mod tests {
         let mut vm = create_test_vm()?;
         let mut process = vm.start()?;
 
-        let block = process.parse_block("x: y: 42 z: 5 y")?;
+        let block = process.vm.parse_block("x: y: 42 z: 5 y")?;
         let code_block = process.compile(block.as_block()?)?;
 
         let result = process.exec(code_block)?;

@@ -2,10 +2,12 @@
 
 use crate::{
     mem::MemoryError,
-    vm::{ByteCode, Process},
+    vm::{ByteCode, Code, Process},
 };
 
-fn add(code: &mut ByteCode) {}
+fn add(code: &mut ByteCode) -> Result<(), MemoryError> {
+    code.push(Code::ADD)
+}
 
 pub fn load(process: &mut Process) -> Result<(), MemoryError> {
     process.add_instrinsic("add", add)?;
