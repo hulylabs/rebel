@@ -1034,6 +1034,12 @@ mod tests {
             "either 5 < 10 [1 2 3] [24] either 15 < 1 [42] [22 7 + 8]",
             Value::int(15),
         )?;
+
+        match run_test_exec("some_word", Value::VALUE_NONE) {
+            Err(VmError::MemoryError(MemoryError::WordNotFound)) => {}
+            result => panic!("Expected error, but got: {:?}", result),
+        }
+
         Ok(())
     }
 }
