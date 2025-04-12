@@ -15,5 +15,7 @@ fn add(process: &mut Process) -> Result<(), VmError> {
 }
 
 /// Native Function of The Standard Library for the Rebel VM.
-pub const NATIVES: &[NativeDescriptor] =
-    &[NativeDescriptor::new("add", "Add two integers", add, 2)];
+pub const NATIVES: &[NativeDescriptor] = &[
+    NativeDescriptor::new("add", "add two numbers", add, 2),
+    NativeDescriptor::new_op("+", "add two numbers operator", add, 1, 2),
+];

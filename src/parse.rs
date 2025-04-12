@@ -369,10 +369,11 @@ where
         }
 
         if !has_digits {
-            return Err(ParserError::EndOfInput);
-        }
-
-        if is_float {
+            self.collector
+                .word(WordKind::Word, if is_negative { "-" } else { "+" })
+                .map(|_| consumed)
+                .map_err(Into::into)
+        } else if is_float {
             if is_negative {
                 float_value = -float_value;
             }

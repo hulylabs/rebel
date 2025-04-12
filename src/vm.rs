@@ -50,12 +50,18 @@ enum Call {
 pub struct Defer {
     call: Call,
     bp: Short,
-    arity: Short,
+    arity: u8,
+    consume: u8,
 }
 
 impl Defer {
-    fn new(call: Call, bp: Short, arity: Short) -> Self {
-        Defer { call, bp, arity }
+    fn new(call: Call, bp: Short, arity: u8, consume: u8) -> Self {
+        Defer {
+            call,
+            bp,
+            arity,
+            consume,
+        }
     }
 }
 
@@ -67,7 +73,8 @@ pub struct NativeDescriptor {
     name: &'static str,
     description: &'static str,
     func: NativeFn,
-    arity: usize,
+    arity: u8,
+    consume: u8,
 }
 
 impl NativeDescriptor {
@@ -75,13 +82,30 @@ impl NativeDescriptor {
         name: &'static str,
         description: &'static str,
         func: NativeFn,
-        arity: usize,
+        arity: u8,
     ) -> Self {
         Self {
             name,
             description,
             func,
             arity,
+            consume: arity,
+        }
+    }
+
+    pub const fn new_op(
+        name: &'static str,
+        description: &'static str,
+        func: NativeFn,
+        arity: u8,
+        consume: u8,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            func,
+            arity,
+            consume,
         }
     }
 }
@@ -105,7 +129,7 @@ impl Vm {
             let description = vm.memory.alloc_string(native.description)?;
             let id = vm.natives.len();
             vm.natives.push(native.func);
-            let native = NativeFunc::new(id, native.arity, description);
+            let native = NativeFunc::new(id, native.arity, native.consume, description);
             let address = vm.memory.push(natives, native)?;
             vm.memory
                 .set_word(symbol.address(), Value::native(address))?;
@@ -295,8 +319,8 @@ impl<'a> Process<'a> {
         // while ip < end || !defer_stack.is_empty() {
         loop {
             while let Some(defer) = defer_stack.last() {
-                if stack_len == defer.bp + defer.arity {
-                    stack_len -= defer.arity;
+                if stack_len == defer.bp + defer.arity as Short {
+                    stack_len -= defer.consume as Short;
                     stack_len += 1;
                     match defer.call {
                         Call::SetWord(binding) => {
@@ -343,14 +367,19 @@ impl<'a> Process<'a> {
                 Value::SET_WORD => {
                     let symbol = value.data();
                     let word_address = self.vm.memory.bind_word(symbol, true)?;
-                    let defer = Defer::new(Call::SetWord(word_address), stack_len, 1);
+                    let defer = Defer::new(Call::SetWord(word_address), stack_len, 1, 1);
                     defer_stack.push(defer)?;
                 }
                 Value::NATIVE_FUNC => {
                     let native_func = self.vm.memory.get::<NativeFunc>(value.data())?;
                     let arity = native_func.arity();
-                    let defer =
-                        Defer::new(Call::CallNative(native_func.func_id()), stack_len, arity);
+                    let consume = native_func.consume();
+                    let defer = Defer::new(
+                        Call::CallNative(native_func.func_id()),
+                        stack_len,
+                        arity,
+                        consume,
+                    );
                     defer_stack.push(defer)?;
                 }
                 _ => {
@@ -910,6 +939,40 @@ mod tests {
     }
 
     #[test]
+    fn test_compile_operator() -> Result<(), VmError> {
+        let mut vm = create_test_vm()?;
+        let block = vm.parse_block("1 + 2")?;
+
+        let mut process = Process::new(&mut vm);
+        let code_block = process.compile(block.as_block()?)?;
+        let code = process.vm.memory.get_items(code_block)?;
+
+        match code {
+            [
+                Code::CONST,
+                TYPE_INT,
+                1,
+                0,
+                0,
+                0,
+                Code::CONST,
+                TYPE_INT,
+                2,
+                0,
+                0,
+                0,
+                Code::CALL_NATIVE,
+                1,
+                0,
+                Code::RET,
+            ] => {}
+            _ => panic!("Unexpected code sequence: {:?}", code),
+        }
+
+        Ok(())
+    }
+
+    #[test]
     fn test_exec_1() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
         let block = vm.parse_block("1 2 3")?;
@@ -964,6 +1027,21 @@ mod tests {
 
         let result = process.exec(code_block)?;
         assert_eq!(result, Value::int(25));
+        assert_eq!(process.stack.len, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_exec_5() -> Result<(), VmError> {
+        let mut vm = create_test_vm()?;
+        let block = vm.parse_block("5 + 5")?;
+
+        let mut process = Process::new(&mut vm);
+        let code_block = process.compile(block.as_block()?)?;
+
+        let result = process.exec(code_block)?;
+        assert_eq!(result, Value::int(10));
         assert_eq!(process.stack.len, 0);
 
         Ok(())

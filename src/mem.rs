@@ -294,22 +294,28 @@ pub struct KeyValue {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct NativeFunc {
+    arity: u8,
+    consume: u8,
     id: Short,
-    arity: Short,
     desc: Address,
 }
 
 impl NativeFunc {
-    pub fn new(id: usize, arity: usize, desc: Series<u8>) -> Self {
+    pub fn new(id: usize, arity: u8, consume: u8, desc: Series<u8>) -> Self {
         Self {
             id: id as Short,
-            arity: arity as Short,
             desc: desc.address,
+            arity,
+            consume,
         }
     }
 
-    pub fn arity(&self) -> Short {
+    pub fn arity(&self) -> u8 {
         self.arity
+    }
+
+    pub fn consume(&self) -> u8 {
+        self.consume
     }
 
     pub fn func_id(&self) -> Short {
