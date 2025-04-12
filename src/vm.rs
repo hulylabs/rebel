@@ -57,20 +57,19 @@ impl Defer {
 
 //
 
-type InstrinsicFn = fn(&mut Process) -> Result<(), VmError>;
+type NativeFn = fn(&mut Process) -> Result<(), VmError>;
 
 pub struct Vm {
     memory: Memory,
-    instrinsics: Vec<InstrinsicFn>,
+    natives: Vec<NativeFn>,
 }
 
 impl Vm {
-    pub fn new(memory: Memory) -> Result<Self, MemoryError> {
-        let instrinsics = Vec::new();
-        Ok(Self {
+    pub fn new(memory: Memory) -> Self {
+        Self {
             memory,
-            instrinsics,
-        })
+            natives: Vec::new(),
+        }
     }
 
     pub fn parse_block(&mut self, input: &str) -> Result<Value, VmError> {
@@ -80,8 +79,8 @@ impl Vm {
     }
 
     pub fn start(&mut self) -> Result<Process, MemoryError> {
-        let mut main = Process::new(self)?;
-        crate::intrinsic::load(&mut main)?;
+        let mut main = Process::new(self);
+        crate::stdlib::load(&mut main)?;
         Ok(main)
     }
 }
@@ -217,33 +216,26 @@ type Stack = ArrayStack<Value, 64>;
 
 pub struct Process<'a> {
     vm: &'a mut Vm,
-    // stack: Series<Value>,
     ip: InstructionPointer,
     stack: Stack,
 }
 
 impl<'a> Process<'a> {
-    pub fn new(vm: &'a mut Vm) -> Result<Self, MemoryError> {
-        // let stack = vm.memory.alloc::<Value>(64)?;
-
-        Ok(Self {
+    pub fn new(vm: &'a mut Vm) -> Self {
+        Self {
             vm,
             stack: ArrayStack::new(),
             ip: InstructionPointer(0),
-        })
+        }
     }
 
     pub fn get_stack_mut(&mut self) -> &mut Stack {
         &mut self.stack
     }
 
-    pub fn add_instrinsic(
-        &mut self,
-        name: &str,
-        instrinsic: InstrinsicFn,
-    ) -> Result<(), MemoryError> {
-        let id = self.vm.instrinsics.len() as Word;
-        self.vm.instrinsics.push(instrinsic);
+    pub fn add_instrinsic(&mut self, name: &str, instrinsic: NativeFn) -> Result<(), MemoryError> {
+        let id = self.vm.natives.len() as Word;
+        self.vm.natives.push(instrinsic);
         self.vm.memory.set_word_str(name, Value::intrinsic(id))
     }
 
@@ -437,7 +429,7 @@ mod tests {
 
     // Helper function to create a test memory
     fn create_test_vm() -> Result<Vm, MemoryError> {
-        Vm::new(Memory::new(65536)?)
+        Ok(Vm::new(Memory::new(65536)?))
     }
 
     // Test basic block parsing with Process

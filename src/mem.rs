@@ -661,7 +661,6 @@ impl Memory {
     ) -> Result<(), MemoryError> {
         let block = self.get::<Block>(series.address)?;
         let len = block.len;
-
         if len == 0 {
             Err(MemoryError::StackUnderflow)
         } else {
