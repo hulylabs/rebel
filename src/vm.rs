@@ -430,7 +430,6 @@ impl Collector for ParseCollector<'_> {
 
     /// Called when a word is parsed
     fn word(&mut self, kind: WordKind, symbol: &str) -> Result<(), Self::Error> {
-        // let symbol = self.vm.memory.alloc_string(symbol)?;
         let symbol = self.memory.get_or_add_symbol(symbol)?;
         self.stack.push(Value::any_word(kind, symbol))
     }
