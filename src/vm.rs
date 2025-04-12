@@ -367,7 +367,7 @@ impl<'a> Process<'a> {
                 let value = self.vm.memory.get::<Value>(ip).copied()?;
                 if value.kind() == Value::WORD {
                     let resolved = self.vm.memory.get_word(value.data())?;
-                    if resolved.kind() == Value::NATIVE_FUNC || resolved.kind() == Value::FUNC {
+                    if resolved.kind() == Value::NATIVE_FUNC {
                         resolved
                     } else {
                         value
