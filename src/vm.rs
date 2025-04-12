@@ -462,8 +462,16 @@ impl<'a> Process<'a> {
                 }
                 Code::WORD => {
                     let binding = self.ip.read_u32(&self.vm.memory)?;
-                    let value = self.vm.memory.get(binding).copied()?;
-                    self.stack.push(value)?;
+                    let value = self.vm.memory.get::<Value>(binding).copied()?;
+
+                    if value.is_func() {
+                        let func_address = value.data();
+                        let func = self.vm.memory.get::<Func>(func_address)?;
+                        let body = func.body();
+                        self.call(Series::new(body))?;
+                    } else {
+                        self.stack.push(value)?;
+                    }
                 }
                 Code::SET_WORD => {
                     let binding = self.ip.read_u32(&self.vm.memory)?;
@@ -494,12 +502,6 @@ impl<'a> Process<'a> {
                         .get(func_id as usize)
                         .ok_or(VmError::BadNativeFunctionIndex)?;
                     native_func(self)?;
-                }
-                Code::CALL_FUNC => {
-                    let func_address = self.ip.read_u32(&self.vm.memory)?;
-                    let func = self.vm.memory.get::<Func>(func_address)?;
-                    let body = func.body();
-                    self.call(Series::new(body))?;
                 }
                 _ => {
                     return Err(VmError::InvalidCode);

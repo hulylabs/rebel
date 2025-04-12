@@ -236,9 +236,12 @@ impl Value {
         self.is_type(Self::PATH)
     }
 
-    /// Returns true if the value is a boolean
     pub fn is_bool(&self) -> bool {
         self.is_type(Self::BOOL)
+    }
+
+    pub fn is_func(&self) -> bool {
+        self.is_type(Self::FUNC)
     }
 
     pub fn any_word(kind: WordKind, symbol: Series<u8>) -> Self {
