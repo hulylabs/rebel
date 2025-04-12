@@ -61,7 +61,7 @@ impl Default for Defer {
 
 //
 
-type InstrinsicFn = fn() -> Result<(), VmError>;
+type InstrinsicFn = fn(&mut ByteCode);
 
 pub struct Vm {
     memory: Memory,
@@ -76,11 +76,17 @@ impl Vm {
             instrinsics,
         })
     }
+
+    pub fn start(&mut self) -> Result<Process, MemoryError> {
+        let mut main = Process::new(self)?;
+        crate::intrinsic::load(&mut main)?;
+        Ok(main)
+    }
 }
 
 //
 
-struct ArrayStack<T, const N: usize> {
+pub struct ArrayStack<T, const N: usize> {
     data: [T; N],
     len: usize,
 }
@@ -133,6 +139,8 @@ where
         self.data.get(..self.len).ok_or(MemoryError::OutOfBounds)
     }
 }
+
+pub type ByteCode = ArrayStack<u8, 1024>;
 
 struct InstructionPointer(usize);
 
@@ -212,7 +220,7 @@ impl<'a> Process<'a> {
 
     pub fn compile(&mut self, block: Series<Value>) -> Result<Series<u8>, MemoryError> {
         let mut defer_stack = ArrayStack::<Defer, 64>::new();
-        let mut code_stack = ArrayStack::<u8, 512>::new();
+        let mut code_stack = ByteCode::new();
 
         let len = self.vm.memory.len(block)?;
         let mut ip = block.address() + Block::SIZE;
@@ -373,7 +381,7 @@ mod tests {
     #[test]
     fn test_parse_1() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let result = process.parse_block("x: 5 x")?;
         let block = vm.memory.peek_at(result.as_block()?, 0)?;
@@ -396,7 +404,7 @@ mod tests {
     #[test]
     fn test_parse_empty_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let result = process.parse_block("")?;
 
@@ -413,7 +421,7 @@ mod tests {
     #[test]
     fn test_parse_integer_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let result = process.parse_block("1 2 3")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
@@ -436,7 +444,7 @@ mod tests {
     #[test]
     fn test_parse_float_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let result = process.parse_block("5.14 -2.5 0.0")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
@@ -460,7 +468,7 @@ mod tests {
     #[test]
     fn test_parse_mixed_numeric_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let result = process.parse_block("42 5.14159 -10 -0.5")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
@@ -486,7 +494,7 @@ mod tests {
     #[test]
     fn test_parse_string_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let result = process.parse_block("\"hello\" \"world\"")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
@@ -506,7 +514,7 @@ mod tests {
     #[test]
     fn test_parse_word_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let result = process.parse_block("word set-word: :get-word")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
@@ -529,7 +537,7 @@ mod tests {
     #[test]
     fn test_parse_nested_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let result = process.parse_block("1 [2 3] 4")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
@@ -566,7 +574,7 @@ mod tests {
     #[test]
     fn test_parse_path() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let result = process.parse_block("a/b c/d/e")?;
         let values = vm.memory.peek_at(result.as_block()?, 0)?;
@@ -591,7 +599,7 @@ mod tests {
     #[test]
     fn test_parse_errors() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         // Invalid escape sequence
         let result = process.parse_block("\"invalid \\z escape\"");
@@ -604,7 +612,7 @@ mod tests {
     #[test]
     fn test_compile_constants() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let block = process.parse_block("1 2 3")?;
         let code_block = process.compile(block.as_block()?)?;
@@ -643,7 +651,7 @@ mod tests {
     #[test]
     fn test_compile_set_word_and_use() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let block = process.parse_block("x: 5 x")?;
         let code_block = process.compile(block.as_block()?)?;
@@ -686,7 +694,7 @@ mod tests {
     #[test]
     fn test_compile_multiple_set_words() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let block = process.parse_block("x: y: z: 42 y")?;
         let code_block = process.compile(block.as_block()?)?;
@@ -743,7 +751,7 @@ mod tests {
     #[test]
     fn test_compile_empty_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let block = process.parse_block("")?;
         let code_block = process.compile(block.as_block()?)?;
@@ -760,7 +768,7 @@ mod tests {
     #[test]
     fn test_exec_1() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let block = process.parse_block("1 2 3")?;
         let code_block = process.compile(block.as_block()?)?;
@@ -775,7 +783,7 @@ mod tests {
     #[test]
     fn test_exec_2() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = Process::new(&mut vm)?;
+        let mut process = vm.start()?;
 
         let block = process.parse_block("x: y: 42 z: 5 y")?;
         let code_block = process.compile(block.as_block()?)?;
