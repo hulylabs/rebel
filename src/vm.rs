@@ -154,6 +154,33 @@ where
         self.len = pos;
         self.data.get(pos..len).ok_or(MemoryError::OutOfBounds)
     }
+
+    fn nip_opt(&mut self, n: usize) -> Option<()> {
+        if n < 2 {
+            return None;
+        }
+        let last = self.len.checked_sub(1)?;
+        let new_last = self.len.checked_sub(n)?;
+        let last_value = self.data.get(last).copied()?;
+        let dst = self.data.get_mut(new_last)?;
+        *dst = last_value;
+        self.len = new_last + 1;
+        Some(())
+    }
+
+    fn nip(&mut self, n: usize) -> Result<(), MemoryError> {
+        self.nip_opt(n).ok_or(MemoryError::StackUnderflow)
+    }
+
+    fn pop_n<const M: usize>(&mut self) -> Result<&[T; M], MemoryError> {
+        let new_len = self.len.checked_sub(M).ok_or(MemoryError::StackUnderflow)?;
+        let result = self
+            .data
+            .get(new_len..self.len)
+            .ok_or(MemoryError::StackUnderflow)?;
+        self.len = new_len;
+        result.try_into().map_err(Into::into)
+    }
 }
 
 pub type ByteCode = ArrayStack<u8, 1024>;
@@ -161,9 +188,8 @@ pub type ByteCode = ArrayStack<u8, 1024>;
 struct InstructionPointer(usize);
 
 impl InstructionPointer {
-    fn new(code: Series<u8>) -> Self {
-        let ip = code.address() + Block::SIZE;
-        Self(ip as usize)
+    fn jmp(&mut self, code: Series<u8>) {
+        self.0 = code.address() as usize + std::mem::size_of::<Block>();
     }
 
     fn read_code(&mut self, memory: &Memory) -> Option<u8> {
@@ -189,14 +215,20 @@ impl InstructionPointer {
 
 pub struct Process<'a> {
     vm: &'a mut Vm,
-    stack: Series<Value>,
+    // stack: Series<Value>,
+    ip: InstructionPointer,
+    stack: ArrayStack<Value, 64>,
 }
 
 impl<'a> Process<'a> {
     pub fn new(vm: &'a mut Vm) -> Result<Self, MemoryError> {
-        let stack = vm.memory.alloc::<Value>(64)?;
+        // let stack = vm.memory.alloc::<Value>(64)?;
 
-        Ok(Self { vm, stack })
+        Ok(Self {
+            vm,
+            stack: ArrayStack::new(),
+            ip: InstructionPointer(0),
+        })
     }
 
     pub fn add_instrinsic(
@@ -266,52 +298,52 @@ impl<'a> Process<'a> {
     }
 
     pub fn exec(&mut self, code_block: Series<u8>) -> Result<Value, VmError> {
-        let mut ip = InstructionPointer::new(code_block);
+        // let mut ip = InstructionPointer::new(code_block);
+        self.ip.jmp(code_block);
 
         // let code = self.vm.memory.get_bytes(code_block.address())?;
         // let mut reader = CodeReader::new(code);
 
-        while let Some(op) = ip.read_code(&self.vm.memory) {
+        while let Some(op) = self.ip.read_code(&self.vm.memory) {
             match op {
                 Code::CONST => {
-                    let kind = ip.read_u8(&self.vm.memory)? as Word;
-                    self.vm
-                        .memory
-                        .push(self.stack, Value::new(kind, ip.read_u32(&self.vm.memory)?))?
+                    let kind = self.ip.read_u8(&self.vm.memory)? as Word;
+                    self.stack
+                        .push(Value::new(kind, self.ip.read_u32(&self.vm.memory)?))?;
                 }
                 Code::WORD => {
-                    let symbol = ip.read_u32(&self.vm.memory)?;
+                    let symbol = self.ip.read_u32(&self.vm.memory)?;
                     let value = self.vm.memory.get_word(symbol)?;
-                    self.vm.memory.push(self.stack, value)?;
+                    self.stack.push(value)?;
                 }
                 Code::SET_WORD => {
-                    let symbol = ip.read_u32(&self.vm.memory)?;
-                    let value = self.vm.memory.peek(self.stack)?.copied();
-                    let value = value.ok_or(MemoryError::StackUnderflow)?;
+                    let symbol = self.ip.read_u32(&self.vm.memory)?;
+                    let value = self
+                        .stack
+                        .last()
+                        .copied()
+                        .ok_or(MemoryError::StackUnderflow)?;
                     self.vm.memory.set_word(symbol, value)?;
                 }
                 Code::LEAVE => {
-                    let drop = ip.read_u8(&self.vm.memory)? as Word;
-                    self.vm.memory.nip(self.stack, drop)?;
+                    let drop = self.ip.read_u8(&self.vm.memory)? as usize;
+                    self.stack.nip(drop)?;
                     break;
                 }
-                Code::NONE => self
-                    .vm
-                    .memory
-                    .push(self.stack, Value::new(Value::NONE, 0))?,
+                Code::NONE => self.stack.push(Value::new(Value::NONE, 0))?,
                 Code::ADD => {
-                    let [va, vb] = self.vm.memory.pop_n(self.stack)?;
+                    let [va, vb] = self.stack.pop_n()?;
                     let a = va.as_int()?;
                     let b = vb.as_int()?;
                     let result = a.checked_add(b).ok_or(VmError::IntegerOverflow)?;
-                    self.vm.memory.push(self.stack, Value::int(result))?;
+                    self.stack.push(Value::int(result))?;
                 }
                 _ => {
                     return Err(VmError::InvalidCode);
                 }
             }
         }
-        self.vm.memory.pop(self.stack).map_err(Into::into)
+        self.stack.pop().map_err(Into::into)
     }
 }
 
@@ -777,7 +809,7 @@ mod tests {
 
         let result = process.exec(code_block)?;
         assert_eq!(result, Value::int(3), "Expected result to be 3");
-        assert_eq!(process.vm.memory.len(process.stack)?, 0);
+        assert_eq!(process.stack.len, 0);
 
         Ok(())
     }
@@ -792,7 +824,7 @@ mod tests {
 
         let result = process.exec(code_block)?;
         assert_eq!(result, Value::int(42), "Expected result to be 3");
-        assert_eq!(process.vm.memory.len(process.stack)?, 0);
+        assert_eq!(process.stack.len, 0);
 
         Ok(())
     }
