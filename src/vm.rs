@@ -12,6 +12,8 @@ pub enum VmError {
     MemoryError(#[from] MemoryError),
     #[error("Invalid code")]
     InvalidCode,
+    #[error("Integer overflow")]
+    IntegerOverflow,
 }
 
 //
@@ -27,6 +29,7 @@ impl Code {
     const WORD: Op = 3;
     const SET_WORD: Op = 4;
     const LEAVE: Op = 5;
+    const ADD: Op = 6;
 }
 
 //
@@ -301,11 +304,19 @@ impl<'a> Process<'a> {
                 }
                 Code::LEAVE => {
                     let drop = ip.read_u8(&self.vm.memory)? as Word;
-                    // let value = self.vm.memory.pop(self.stack)?;
-                    // self.vm.memory.drop(self.stack, drop)?;
-                    // self.vm.memory.push(self.stack, value)?;
                     self.vm.memory.nip(self.stack, drop)?;
                     break;
+                }
+                Code::NONE => self
+                    .vm
+                    .memory
+                    .push(self.stack, Value::new(Value::NONE, 0))?,
+                Code::ADD => {
+                    let [va, vb] = self.vm.memory.pop_n(self.stack)?;
+                    let a = va.as_int()?;
+                    let b = vb.as_int()?;
+                    let result = a.checked_add(b).ok_or(VmError::IntegerOverflow)?;
+                    self.vm.memory.push(self.stack, Value::int(result))?;
                 }
                 _ => {
                     return Err(VmError::InvalidCode);

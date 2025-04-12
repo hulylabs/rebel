@@ -26,6 +26,8 @@ pub enum MemoryError {
     OutOfMemory,
     #[error("Word not found")]
     WordNotFound,
+    #[error(transparent)]
+    TryFromSliceError(#[from] std::array::TryFromSliceError),
 }
 
 pub type Word = u32;
@@ -403,25 +405,24 @@ impl Memory {
 
     fn get_items_slice<I: AnyBitPattern>(
         &self,
-        address: Address,
+        series: Series<I>,
         range: Range<Offset>,
     ) -> Result<&[I], MemoryError> {
         let item_size = std::mem::size_of::<I>() as Offset;
         let range = range.start * item_size..range.end * item_size;
-        let bytes = self.get_byte_slice(address, range)?;
+        let bytes = self.get_byte_slice(series.address, range)?;
         try_cast_slice(bytes).map_err(podcast_error)
     }
 
     fn get_items_slice_mut<I: AnyBitPattern + NoUninit>(
         &mut self,
-        address: Address,
+        series: Series<I>,
         range: Range<Offset>,
     ) -> Result<&mut [I], MemoryError> {
         let item_size = std::mem::size_of::<I>() as Offset;
         let range = range.start * item_size..range.end * item_size;
-        let bytes = self.get_byte_slice_mut(address, range)?;
+        let bytes = self.get_byte_slice_mut(series.address, range)?;
         try_cast_slice_mut(bytes).map_err(podcast_error)
-        // Ok(must_cast_slice_mut(bytes)) //.map_err(podcast_error)
     }
 
     pub fn alloc_string(&mut self, string: &str) -> Result<Series<u8>, MemoryError> {
@@ -435,10 +436,9 @@ impl Memory {
     }
 
     pub fn get_items<I: AnyBitPattern>(&self, series: Series<I>) -> Result<&[I], MemoryError> {
-        let address = series.address;
-        let block = self.get::<Block>(address)?;
+        let block = self.get::<Block>(series.address)?;
         let len = block.len;
-        self.get_items_slice(address, 0..len)
+        self.get_items_slice(series, 0..len)
     }
 
     pub fn get<I: AnyBitPattern>(&self, address: Address) -> Result<&I, MemoryError> {
@@ -514,7 +514,7 @@ impl Memory {
             Err(MemoryError::StackOverflow)
         } else {
             block.len = new_len;
-            let items = self.get_items_slice_mut(series.address, len..new_len)?;
+            let items = self.get_items_slice_mut(series, len..new_len)?;
             let iter = items.iter_mut().zip(values.iter());
             for (dst, src) in iter {
                 *dst = *src
@@ -566,6 +566,20 @@ impl Memory {
             .copied()
     }
 
+    pub fn pop_n<const N: usize, I: AnyBitPattern>(
+        &mut self,
+        series: Series<I>,
+    ) -> Result<&[I; N], MemoryError> {
+        let block = self.get_mut::<Block>(series.address)?;
+        let len = block.len;
+        let new_len = len
+            .checked_sub(N as Offset)
+            .ok_or(MemoryError::StackUnderflow)?;
+        block.len = new_len;
+        let slice = self.get_items_slice(series, new_len..len)?;
+        slice.try_into().map_err(Into::into)
+    }
+
     pub fn peek<I: AnyBitPattern>(&self, series: Series<I>) -> Result<Option<&I>, MemoryError> {
         let item_size = std::mem::size_of::<I>() as Offset;
         let block = self.get::<Block>(series.address)?;
@@ -591,7 +605,7 @@ impl Memory {
         if pos >= len {
             Err(MemoryError::OutOfBounds)
         } else {
-            self.get_items_slice(series.address, pos..len)
+            self.get_items_slice(series, pos..len)
         }
     }
 
@@ -652,7 +666,7 @@ impl Memory {
         if len == 0 {
             Err(MemoryError::StackUnderflow)
         } else {
-            let items_slice = self.get_items_slice_mut::<I>(series.address, 0..len)?;
+            let items_slice = self.get_items_slice_mut::<I>(series, 0..len)?;
             let last_index = (len - 1) as usize;
             let last = items_slice
                 .get(last_index)
