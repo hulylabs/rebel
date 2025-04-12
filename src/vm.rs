@@ -57,7 +57,7 @@ impl Defer {
 
 //
 
-type InstrinsicFn = fn(&mut ByteCode) -> Result<(), MemoryError>;
+type InstrinsicFn = fn(&mut Process) -> Result<(), VmError>;
 
 pub struct Vm {
     memory: Memory,
@@ -156,7 +156,7 @@ where
     }
 
     fn nip_opt(&mut self, n: usize) -> Option<()> {
-        if n < 2 {
+        if n == 0 {
             return None;
         }
         let last = self.len.checked_sub(1)?;
@@ -172,7 +172,7 @@ where
         self.nip_opt(n).ok_or(MemoryError::StackUnderflow)
     }
 
-    fn pop_n<const M: usize>(&mut self) -> Result<&[T; M], MemoryError> {
+    pub fn pop_n<const M: usize>(&mut self) -> Result<&[T; M], MemoryError> {
         let new_len = self.len.checked_sub(M).ok_or(MemoryError::StackUnderflow)?;
         let result = self
             .data
@@ -213,11 +213,13 @@ impl InstructionPointer {
 
 //
 
+type Stack = ArrayStack<Value, 64>;
+
 pub struct Process<'a> {
     vm: &'a mut Vm,
     // stack: Series<Value>,
     ip: InstructionPointer,
-    stack: ArrayStack<Value, 64>,
+    stack: Stack,
 }
 
 impl<'a> Process<'a> {
@@ -229,6 +231,10 @@ impl<'a> Process<'a> {
             stack: ArrayStack::new(),
             ip: InstructionPointer(0),
         })
+    }
+
+    pub fn get_stack_mut(&mut self) -> &mut Stack {
+        &mut self.stack
     }
 
     pub fn add_instrinsic(
