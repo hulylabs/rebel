@@ -252,6 +252,7 @@ where
 
 pub type ByteCode = ArrayStack<u8, 1024>;
 
+#[derive(Debug, Clone, Copy)]
 struct InstructionPointer(usize);
 
 impl InstructionPointer {
@@ -282,6 +283,10 @@ impl InstructionPointer {
         self.0 += 4;
         Ok(result)
     }
+
+    fn is_halted(&self) -> bool {
+        self.0 == 0
+    }
 }
 
 //
@@ -292,6 +297,7 @@ pub struct Process<'a> {
     vm: &'a mut Vm,
     ip: InstructionPointer,
     stack: Stack,
+    call_stack: ArrayStack<InstructionPointer, 64>,
 }
 
 impl<'a> Process<'a> {
@@ -300,6 +306,7 @@ impl<'a> Process<'a> {
             vm,
             stack: ArrayStack::new(),
             ip: InstructionPointer(0),
+            call_stack: ArrayStack::new(),
         }
     }
 
@@ -400,9 +407,31 @@ impl<'a> Process<'a> {
         self.vm.memory.alloc_items(code_stack.as_slice()?)
     }
 
-    pub fn exec(&mut self, code_block: Series<u8>) -> Result<Value, VmError> {
-        self.ip.jmp(code_block);
+    pub fn get_binding(&mut self, series: Series<Value>) -> Result<Series<u8>, MemoryError> {
+        let block = self.vm.memory.get::<Block>(series.address())?;
+        let bindings = block.bindings;
+        if bindings != 0 {
+            Ok(Series::new(bindings))
+        } else {
+            let code = self.compile(series)?;
+            let block = self.vm.memory.get_mut::<Block>(series.address())?;
+            block.bindings = code.address();
+            Ok(code)
+        }
+    }
 
+    pub fn call(&mut self, code_block: Series<u8>) -> Result<(), VmError> {
+        self.call_stack.push(self.ip)?;
+        self.ip.jmp(code_block);
+        Ok(())
+    }
+
+    pub fn exec(&mut self, code_block: Series<u8>) -> Result<Value, VmError> {
+        self.call(code_block)?;
+        self.run()
+    }
+
+    pub fn run(&mut self) -> Result<Value, VmError> {
         while let Some(op) = self.ip.read_code(&self.vm.memory) {
             match op {
                 Code::CONST => {
@@ -430,7 +459,10 @@ impl<'a> Process<'a> {
                     self.stack.nip(drop)?;
                 }
                 Code::RET => {
-                    break;
+                    self.ip = self.call_stack.pop()?;
+                    if self.ip.is_halted() {
+                        break;
+                    }
                 }
                 Code::NONE => self.stack.push(Value::new(Value::NONE, 0))?,
                 Code::CALL_NATIVE => {

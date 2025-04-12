@@ -65,6 +65,7 @@ pub type Type = Offset;
 pub struct Block {
     cap: Offset, // Total capacity in bytes, including the header (word-aligned)
     len: Offset, // Number of items currently in the block
+    pub bindings: Address,
 }
 
 impl Block {
@@ -115,7 +116,7 @@ pub struct Series<T> {
 }
 
 impl<T> Series<T> {
-    fn new(address: Address) -> Self {
+    pub fn new(address: Address) -> Self {
         Self {
             address,
             _marker: std::marker::PhantomData,
@@ -230,6 +231,11 @@ impl Value {
         self.is_type(Self::PATH)
     }
 
+    /// Returns true if the value is a boolean
+    pub fn is_bool(&self) -> bool {
+        self.is_type(Self::BOOL)
+    }
+
     pub fn any_word(kind: WordKind, symbol: Series<u8>) -> Self {
         let typ = match kind {
             WordKind::Word => Self::WORD,
@@ -274,6 +280,14 @@ impl Value {
     pub fn as_float(&self) -> Result<f32, MemoryError> {
         if self.is_float() {
             Ok(f32::from_bits(self.1))
+        } else {
+            Err(MemoryError::TypeMismatch)
+        }
+    }
+
+    pub fn as_bool(&self) -> Result<bool, MemoryError> {
+        if self.is_bool() {
+            Ok(self.1 != 0)
         } else {
             Err(MemoryError::TypeMismatch)
         }
@@ -381,6 +395,7 @@ impl Memory {
             let block = self.get_mut::<Block>(heap_top)?;
             block.cap = cap;
             block.len = init_len as Offset;
+            block.bindings = 0;
             Ok(heap_top)
         }
     }
