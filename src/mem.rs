@@ -31,6 +31,7 @@ pub enum MemoryError {
 }
 
 pub type Word = u32;
+pub type Short = u16;
 pub type Address = Word;
 pub type Offset = Word;
 pub type Type = Offset;
@@ -145,7 +146,7 @@ impl Value {
     pub const GET_WORD: Type = 7;
     pub const PATH: Type = 8;
     pub const FLOAT: Type = 9;
-    pub const INTRINSIC: Type = 10;
+    pub const NATIVE_FUNC: Type = 10;
 
     pub fn new(kind: Type, data: Word) -> Self {
         Self(kind, data)
@@ -188,8 +189,8 @@ impl Value {
         Value(Self::PATH, value.address)
     }
 
-    pub fn intrinsic(id: Word) -> Self {
-        Value(Self::INTRINSIC, id)
+    pub fn native(id: Word) -> Self {
+        Value(Self::NATIVE_FUNC, id)
     }
 
     /// Returns true if the value is of the given type
@@ -290,6 +291,26 @@ pub struct KeyValue {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub struct NativeFunc {
+    id: Short,
+    arity: Short,
+    desc: Address,
+}
+
+impl NativeFunc {
+    pub fn new(id: usize, arity: usize, desc: Series<u8>) -> Self {
+        Self {
+            id: id as Short,
+            arity: arity as Short,
+            desc: desc.address,
+        }
+    }
+}
+
+//
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
 pub struct MemHeader {
     dead_beef: Word,
     heap_top: Address,
@@ -327,14 +348,15 @@ impl Memory {
 
     fn heap_alloc(
         &mut self,
-        size_in_bytes: Offset,
-        init_len: Offset,
+        size_in_bytes: usize,
+        init_len: usize,
     ) -> Result<Address, MemoryError> {
         let len = self.memory.len() as Offset;
-        let cap = Block::SIZE + size_in_bytes;
+        let cap = std::mem::size_of::<Block>() + size_in_bytes;
         let cap = (cap + 3) & !3;
         let header = self.get_mut::<MemHeader>(0)?;
         let heap_top = header.heap_top;
+        let cap = cap as Offset;
         let new_heap_top = heap_top + cap;
         if new_heap_top > len {
             Err(MemoryError::OutOfMemory)
@@ -342,7 +364,7 @@ impl Memory {
             header.heap_top = new_heap_top;
             let block = self.get_mut::<Block>(heap_top)?;
             block.cap = cap;
-            block.len = init_len;
+            block.len = init_len as Offset;
             Ok(heap_top)
         }
     }
@@ -356,8 +378,8 @@ impl Memory {
     ///
     /// For types smaller than a word (like u8), multiple items can be stored per word.
     /// For types larger than a word (like Value), multiple words are needed per item.
-    pub fn alloc<I>(&mut self, items: Offset) -> Result<Series<I>, MemoryError> {
-        let item_size = std::mem::size_of::<I>() as Offset;
+    pub fn alloc<I>(&mut self, items: usize) -> Result<Series<I>, MemoryError> {
+        let item_size = std::mem::size_of::<I>();
         let address = self.heap_alloc(item_size * items, 0)?;
         Ok(Series::new(address))
     }
@@ -366,11 +388,11 @@ impl Memory {
         &mut self,
         items: &[I],
     ) -> Result<Series<I>, MemoryError> {
-        let len = items.len() as Offset;
-        let size_in_bytes = len * std::mem::size_of::<I>() as Offset;
+        let len = items.len();
+        let size_in_bytes = len * std::mem::size_of::<I>();
         let address = self.heap_alloc(size_in_bytes, len)?;
 
-        let bytes = self.get_byte_slice_mut(address, 0..size_in_bytes)?;
+        let bytes = self.get_byte_slice_mut(address, 0..size_in_bytes as Offset)?;
         let target = try_cast_slice_mut(bytes).map_err(podcast_error)?;
 
         let iter = target.iter_mut().zip(items.iter());
@@ -479,7 +501,7 @@ impl Memory {
         &mut self,
         series: Series<I>,
         value: I,
-    ) -> Result<(), MemoryError> {
+    ) -> Result<Address, MemoryError> {
         let block = self.get_mut::<Block>(series.address)?;
         let len = block.len;
         let item_size = std::mem::size_of::<I>() as Offset;
@@ -489,9 +511,10 @@ impl Memory {
             Err(MemoryError::StackOverflow)
         } else {
             block.len = len + 1;
-            let item = self.get_mut::<I>(series.address + Block::SIZE + item_start)?;
+            let address = series.address + Block::SIZE + item_start;
+            let item = self.get_mut::<I>(address)?;
             *item = value;
-            Ok(())
+            Ok(address)
         }
     }
 

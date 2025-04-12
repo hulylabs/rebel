@@ -2,5 +2,5 @@
 
 pub mod mem;
 pub mod parse;
-pub mod stdlib;
+mod stdlib;
 pub mod vm;

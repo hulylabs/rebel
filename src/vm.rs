@@ -2,7 +2,9 @@
 
 use std::mem::zeroed;
 
-use crate::mem::{Address, Block, Memory, MemoryError, Offset, Series, Type, Value, Word};
+use crate::mem::{
+    Address, Block, Memory, MemoryError, NativeFunc, Offset, Series, Type, Value, Word,
+};
 use crate::parse::{Collector, Parser, ParserError, WordKind};
 use thiserror::Error;
 
@@ -59,17 +61,55 @@ impl Defer {
 
 type NativeFn = fn(&mut Process) -> Result<(), VmError>;
 
+pub struct NativeDescriptor {
+    name: &'static str,
+    description: &'static str,
+    func: NativeFn,
+    arity: usize,
+}
+
+impl NativeDescriptor {
+    pub const fn new(
+        name: &'static str,
+        description: &'static str,
+        func: NativeFn,
+        arity: usize,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            func,
+            arity,
+        }
+    }
+}
+
 pub struct Vm {
     memory: Memory,
     natives: Vec<NativeFn>,
 }
 
 impl Vm {
-    pub fn new(memory: Memory) -> Self {
-        Self {
+    pub fn new(memory: Memory) -> Result<Self, MemoryError> {
+        let descs = crate::stdlib::NATIVES;
+        let mut vm = Self {
             memory,
-            natives: Vec::new(),
+            natives: Vec::<NativeFn>::with_capacity(descs.len()),
+        };
+        let natives = vm.memory.alloc::<NativeFunc>(descs.len())?;
+
+        for native in descs {
+            let symbol = vm.memory.get_or_add_symbol(native.name)?;
+            let description = vm.memory.alloc_string(native.description)?;
+            let id = vm.natives.len();
+            vm.natives.push(native.func);
+            let native = NativeFunc::new(id, native.arity, description);
+            let address = vm.memory.push(natives, native)?;
+            vm.memory
+                .set_word(symbol.address(), Value::native(address))?;
         }
+
+        Ok(vm)
     }
 
     pub fn parse_block(&mut self, input: &str) -> Result<Value, VmError> {
@@ -78,10 +118,22 @@ impl Vm {
         collector.stack.pop().map_err(Into::into)
     }
 
-    pub fn start(&mut self) -> Result<Process, MemoryError> {
-        let mut main = Process::new(self);
-        crate::stdlib::load(&mut main)?;
-        Ok(main)
+    pub fn start(&mut self) -> Result<(), MemoryError> {
+        let descs = crate::stdlib::NATIVES;
+        let natives = self.memory.alloc::<NativeFunc>(descs.len())?;
+
+        for native in descs {
+            let symbol = self.memory.get_or_add_symbol(native.name)?;
+            let description = self.memory.alloc_string(native.description)?;
+            let id = self.natives.len();
+            self.natives.push(native.func);
+            let native = NativeFunc::new(id, native.arity, description);
+            let address = self.memory.push(natives, native)?;
+            self.memory
+                .set_word(symbol.address(), Value::native(address))?;
+        }
+
+        Ok(())
     }
 }
 
@@ -231,12 +283,6 @@ impl<'a> Process<'a> {
 
     pub fn get_stack_mut(&mut self) -> &mut Stack {
         &mut self.stack
-    }
-
-    pub fn add_instrinsic(&mut self, name: &str, instrinsic: NativeFn) -> Result<(), MemoryError> {
-        let id = self.vm.natives.len() as Word;
-        self.vm.natives.push(instrinsic);
-        self.vm.memory.set_word_str(name, Value::intrinsic(id))
     }
 
     pub fn compile(&mut self, block: Series<Value>) -> Result<Series<u8>, MemoryError> {
@@ -429,7 +475,7 @@ mod tests {
 
     // Helper function to create a test memory
     fn create_test_vm() -> Result<Vm, MemoryError> {
-        Ok(Vm::new(Memory::new(65536)?))
+        Vm::new(Memory::new(65536)?)
     }
 
     // Test basic block parsing with Process
@@ -644,9 +690,9 @@ mod tests {
     #[test]
     fn test_compile_constants() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let block = vm.parse_block("1 2 3")?;
 
-        let block = process.vm.parse_block("1 2 3")?;
+        let mut process = Process::new(&mut vm);
         let code_block = process.compile(block.as_block()?)?;
         let code = process.vm.memory.get_items(code_block)?;
 
@@ -683,9 +729,9 @@ mod tests {
     #[test]
     fn test_compile_set_word_and_use() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let block = vm.parse_block("x: 5 x")?;
 
-        let block = process.vm.parse_block("x: 5 x")?;
+        let mut process = Process::new(&mut vm);
         let code_block = process.compile(block.as_block()?)?;
         let code = process.vm.memory.get_items(code_block)?;
 
@@ -726,9 +772,9 @@ mod tests {
     #[test]
     fn test_compile_multiple_set_words() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let block = vm.parse_block("x: y: z: 42 y")?;
 
-        let block = process.vm.parse_block("x: y: z: 42 y")?;
+        let mut process = Process::new(&mut vm);
         let code_block = process.compile(block.as_block()?)?;
         let code = process.vm.memory.get_items(code_block)?;
 
@@ -783,9 +829,9 @@ mod tests {
     #[test]
     fn test_compile_empty_block() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let block = vm.parse_block("")?;
 
-        let block = process.vm.parse_block("")?;
+        let mut process = Process::new(&mut vm);
         let code_block = process.compile(block.as_block()?)?;
         let code = process.vm.memory.get_items(code_block)?;
 
@@ -800,9 +846,9 @@ mod tests {
     #[test]
     fn test_exec_1() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let block = vm.parse_block("1 2 3")?;
 
-        let block = process.vm.parse_block("1 2 3")?;
+        let mut process = Process::new(&mut vm);
         let code_block = process.compile(block.as_block()?)?;
 
         let result = process.exec(code_block)?;
@@ -815,9 +861,9 @@ mod tests {
     #[test]
     fn test_exec_2() -> Result<(), VmError> {
         let mut vm = create_test_vm()?;
-        let mut process = vm.start()?;
+        let block = vm.parse_block("x: y: 42 z: 5 y")?;
 
-        let block = process.vm.parse_block("x: y: 42 z: 5 y")?;
+        let mut process = Process::new(&mut vm);
         let code_block = process.compile(block.as_block()?)?;
 
         let result = process.exec(code_block)?;
